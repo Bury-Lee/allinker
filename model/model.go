@@ -1,4 +1,4 @@
-// Package model 定义了 ALLinker CLI 工具的所有数据类型。
+// Package model 定义了 allinker CLI 工具的所有数据类型。
 //
 // 包括：用户账户、文件锁信息、监控项、消息、
 // 审计日志条目以及应用配置。

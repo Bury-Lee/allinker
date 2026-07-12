@@ -1,4 +1,4 @@
-// cli_watch.go - watch 子命令处理
+﻿// cli_watch.go - watch 子命令处理
 
 package cli
 
@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	watchpkg "allinker/watch"
 	waitpkg "allinker/wait"
+	watchpkg "allinker/watch"
 )
 
 // TODO:待完成功能 — 后续可考虑实现后台守护进程实时监听
@@ -77,12 +77,12 @@ func handleWatchAdd(args []string, humanMode bool) {
 
 	count := watchpkg.CountMatchingFiles(dir, pattern)
 	if humanMode {
-		fmt.Printf("👀 监听位已注册: %q (创建者: %s)\n", item.Name, item.Creator)
+		fmt.Printf("监听位已注册: %q (创建者: %s)\n", item.Name, item.Creator)
 		fmt.Printf("   目录: %s\n", item.Dir)
 		fmt.Printf("   模式: %s\n", item.Pattern)
 		fmt.Printf("   当前匹配文件: %d个\n", count)
 	} else {
-		fmt.Printf("👀 监听位已注册: %s\n", item.Name)
+		fmt.Printf("监听位已注册: %s\n", item.Name)
 	}
 }
 
@@ -98,27 +98,27 @@ func handleWatchList(args []string, humanMode bool) {
 
 	if len(watches) == 0 {
 		if name != "" {
-			fmt.Printf("📭 监听位 %q 不存在\n", name)
+			fmt.Printf("监听位 %q 不存在\n", name)
 		} else {
-			fmt.Println("📭 没有注册的监听位")
+			fmt.Println("没有注册的监听位")
 		}
 		return
 	}
 
 	if humanMode {
-		fmt.Printf("👀 监听位列表 (共%d个):\n\n", len(watches))
+		fmt.Printf("监听位列表 (共%d个):\n\n", len(watches))
 		for _, w := range watches {
 			fmt.Printf("  名称: %s\n", w.Name)
 			fmt.Printf("  创建者: %s\n", w.Creator)
 			fmt.Printf("  目录: %s\n", w.Dir)
 			fmt.Printf("  模式: %s\n", w.Pattern)
-			fmt.Printf("  状态: 🟢 正常\n")
+			fmt.Printf("  状态: 正常\n")
 			fmt.Printf("  最后变更: %s\n", w.LastChange)
 			fmt.Println()
 		}
 	} else {
 		for _, w := range watches {
-			fmt.Printf("👀 %s (创建者: %s, 目录: %s, 模式: %s)\n",
+			fmt.Printf("%s (创建者: %s, 目录: %s, 模式: %s)\n",
 				w.Name, w.Creator, w.Dir, w.Pattern)
 		}
 	}
@@ -138,7 +138,7 @@ func handleWatchCheck(args []string, humanMode bool) {
 		}
 		if len(allWatches) == 0 {
 			if humanMode {
-				fmt.Println("📭 没有注册的监听位")
+				fmt.Println("没有注册的监听位")
 			} else {
 				fmt.Println("没有监听位")
 			}
@@ -154,7 +154,7 @@ func handleWatchCheck(args []string, humanMode bool) {
 			if len(newFiles) > 0 {
 				hasChanges = true
 				if humanMode {
-					fmt.Printf("🔔 监听位 %q 检测到 %d 个变更:\n", w.Name, len(newFiles))
+					fmt.Printf("监听位 %q 检测到 %d 个变更:\n", w.Name, len(newFiles))
 					for _, f := range newFiles {
 						fmt.Printf("   - %s\n", f)
 					}
@@ -165,7 +165,7 @@ func handleWatchCheck(args []string, humanMode bool) {
 		}
 		if !hasChanges {
 			if humanMode {
-				fmt.Println("📭 所有监听位均无变化")
+				fmt.Println("所有监听位均无变化")
 			} else {
 				fmt.Println("无变化")
 			}
@@ -180,20 +180,20 @@ func handleWatchCheck(args []string, humanMode bool) {
 	}
 
 	if humanMode {
-		fmt.Printf("👀 检查 %q\n", name)
+		fmt.Printf("检查 %q\n", name)
 		if len(newFiles) > 0 {
-			fmt.Printf("🔔 检测到 %d 个新文件:\n", len(newFiles))
+			fmt.Printf("检测到 %d 个新文件:\n", len(newFiles))
 			for _, f := range newFiles {
 				fmt.Printf("   - %s (新文件)\n", f)
 			}
 		} else {
-			fmt.Println("📭 没有新文件")
+			fmt.Println("没有新文件")
 		}
 	} else {
 		if len(newFiles) > 0 {
-			fmt.Printf("🔔 %d 个新文件\n", len(newFiles))
+			fmt.Printf("%d 个新文件\n", len(newFiles))
 		} else {
-			fmt.Println("📭 无变化")
+			fmt.Println("无变化")
 		}
 	}
 }
@@ -214,7 +214,7 @@ func handleWatchRemove(args []string, humanMode bool) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("🗑️ 监听位已取消: %s\n", name)
+	fmt.Printf("监听位已取消: %s\n", name)
 }
 
 // handleWatchWait 阻塞等待监听位的文件变化。
@@ -241,7 +241,7 @@ func handleWatchWait(args []string, humanMode bool) {
 
 	watch := watches[0]
 	if humanMode {
-		fmt.Printf("⏳ 正在监听 %q 的文件变更 (%s/%s, 超时: %d秒)...\n", name, watch.Dir, watch.Pattern, timeout)
+		fmt.Printf("正在监听 %q 的文件变更 (%s/%s, 超时: %d秒)...\n", name, watch.Dir, watch.Pattern, timeout)
 	} else {
 		fmt.Printf("正在监听 %s/%s (超时: %d秒)\n", watch.Dir, watch.Pattern, timeout)
 	}
@@ -254,7 +254,7 @@ func handleWatchWait(args []string, humanMode bool) {
 	}
 
 	if humanMode {
-		fmt.Printf("🔔 检测到文件变更: %s (等待耗时: %d秒)\n", matchedFile, elapsed)
+		fmt.Printf("检测到文件变更: %s (等待耗时: %d秒)\n", matchedFile, elapsed)
 	} else {
 		fmt.Printf("%s (等待%d秒)\n", matchedFile, elapsed)
 	}
@@ -268,5 +268,5 @@ func handleWatchClear(args []string, humanMode bool) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("🗑️ 已清除 %s 的所有监听位\n", username)
+	fmt.Printf("已清除 %s 的所有监听位\n", username)
 }

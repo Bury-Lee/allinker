@@ -20,7 +20,7 @@ import (
 type MessageORM struct {
 	ID         int64     `gorm:"primaryKey;autoIncrement"`
 	SenderName string    `gorm:"not null;index"`
-	To         string    `gorm:"not null;index"`    // 收件人用户名（单条消息只有一个收件人）
+	To         string    `gorm:"not null;index"` // 收件人用户名（单条消息只有一个收件人）
 	Content    string    `gorm:"not null;type:text"`
 	ReadBitmap []byte    `gorm:"type:blob;not null;default:x'00'"`
 	CreatedAt  time.Time `gorm:"index"`

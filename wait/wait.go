@@ -1,4 +1,4 @@
-// Package wait 提供等待文件出现和消息到达的功能。
+﻿// Package wait 提供等待文件出现和消息到达的功能。
 // wait 命令会阻塞当前进程，直到条件满足或超时。
 package wait
 
@@ -160,7 +160,7 @@ func fileHash(path string) string {
 func printFileContent(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️ 读取文件内容失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "读取文件内容失败: %v\n", err)
 		return
 	}
 	fmt.Println("--- 文件内容 ---")

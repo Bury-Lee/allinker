@@ -1,4 +1,4 @@
-// cli_wait.go - wait 命令处理
+﻿// cli_wait.go - wait 命令处理
 // 支持等待文件出现或等待其他用户发来的消息。
 
 package cli
@@ -98,9 +98,9 @@ func handleWaitMessage(args []string) {
 	timeout, _ := parseIntArg(remaining, "-t", 60)
 
 	if from != "" {
-		fmt.Printf("⏳ 正在等待来自 %s 的指令（超时: %d秒）...\n", from, timeout)
+		fmt.Printf("正在等待来自 %s 的指令（超时: %d秒）...\n", from, timeout)
 	} else {
-		fmt.Printf("⏳ 正在等待其他用户发来的指令（超时: %d秒）...\n", timeout)
+		fmt.Printf("正在等待其他用户发来的指令（超时: %d秒）...\n", timeout)
 	}
 
 	content, elapsed, err := waitpkg.WaitForMessage(from, timeout)
@@ -110,6 +110,6 @@ func handleWaitMessage(args []string) {
 		return
 	}
 
-	fmt.Printf("📩 %s\n", content)
+	fmt.Printf("%s\n", content)
 	fmt.Printf("  (等待耗时: %d秒)\n", elapsed)
 }

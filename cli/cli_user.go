@@ -1,4 +1,4 @@
-// cli_user.go — user 命令处理（管理员功能）
+﻿// cli_user.go — user 命令处理（管理员功能）
 package cli
 
 import (
@@ -69,14 +69,14 @@ func handleUserList(args []string, humanMode bool) {
 	}
 
 	if humanMode {
-		fmt.Printf("👥 用户列表 (%d)\n\n", len(users))
+		fmt.Printf("用户列表 (%d)\n\n", len(users))
 		fmt.Printf("  角色    用户名    状态      注册时间\n")
 		fmt.Printf("  ──────────────────────────────────────\n")
 		for _, u := range users {
-			statusStr := "🟢 正常"
+			statusStr := "正常"
 			extra := ""
 			if u.Status == model.UserStatusDisabled {
-				statusStr = "🔴 已禁用"
+				statusStr = "已禁用"
 				if u.DisabledReason != "" {
 					extra = fmt.Sprintf(" (原因: %s)", u.DisabledReason)
 				}
@@ -153,12 +153,12 @@ func handleUserLog(args []string, humanMode bool) {
 	}
 
 	if len(filtered) == 0 {
-		fmt.Printf("📋 %s 没有操作记录\n", targetName)
+		fmt.Printf("%s 没有操作记录\n", targetName)
 		return
 	}
 
 	if humanMode {
-		fmt.Printf("📋 %s 的操作记录 (最近 %d 条", targetName, len(filtered))
+		fmt.Printf("%s 的操作记录 (最近 %d 条", targetName, len(filtered))
 		if actionType != "" {
 			fmt.Printf(", 筛选: %s", actionType)
 		}
@@ -271,4 +271,3 @@ func handleUserDelete(args []string, humanMode bool) {
 
 	fmt.Printf("账号已删除: %s\n", targetName)
 }
-

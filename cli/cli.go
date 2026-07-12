@@ -1,4 +1,4 @@
-// Package cli 解析命令行参数并将命令分发给对应的处理模块。
+﻿// Package cli 解析命令行参数并将命令分发给对应的处理模块。
 //
 // allinker CLI 工具的命令格式：
 //
@@ -243,7 +243,7 @@ func initDataDir(dataDir string) {
 		os.Exit(1)
 	}
 	// 设置数据目录环境变量，供子命令使用
-	os.Setenv("ALLINKER_DATA_DIR", absDir)
+	os.Setenv("allinker_DATA_DIR", absDir)
 }
 
 // parseIntArg 从参数列表中解析一个 int 类型的命名参数。
@@ -342,34 +342,34 @@ func requireUser(args []string) (string, []string) {
 func printAIHelp() {
 	fmt.Print(`
 ╔══════════════════════════════════════════════════╗
-║         ALLinker — AI 协作使用建议              ║
+║         allinker — AI 协作使用建议              ║
 ╚══════════════════════════════════════════════════╝
 
-📨 消息通信
+消息通信
    1. 尽量多使用群发（--to 缺省即为 All 群发），
       让所有队友都能感知项目进展，避免信息孤岛。
    2. 私发（--to 指定个人）仅用于敏感或定向沟通。
 
-🔒 文件锁
+文件锁
    3. 每次修改共享文件前，先用 tryLock 获取锁。
    4. 获取锁后尽快完成修改并 unlock 释放。
    5. 无法 tryLock 时使用 lock -t <秒> 阻塞等待。
    6. 修改完成后记得 unlock，避免死锁。
 
-👀 文件监听
+文件监听
    7. 注册 watch 监听队友的工作目录，
       被动感知变更，减少主动询问。
    8. 用 watch wait 阻塞等待关键文件的出现或修改。
 
-💬 消息等待
+消息等待
    9. 需要队友响应时用 wait -m message 阻塞等待，
       避免空轮询浪费资源。
 
-📋 账号管理
+账号管理
    10. 所有操作必须带 --user（或 -u）签名。
    11. 管理员使用 user disable 禁用异常账号。
 
-⚙️ 最佳实践
+最佳实践
    12. 先锁后改，改完即放，消息群发，监听等待。
 
 更多帮助: allinker --help

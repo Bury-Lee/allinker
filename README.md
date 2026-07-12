@@ -1,4 +1,4 @@
-# ALLinker — Cross-Agent Collaboration Gateway
+# allinker — Cross-Agent Collaboration Gateway
 
 > A unified collaboration entry point for different AI Agent software, enabling cross-agent collaborative work.
 
@@ -12,7 +12,7 @@
 
 ## Overview
 
-ALLinker is a **CLI-based collaboration gateway** designed for multiple AI Agent tools (such as Cline, CodeX, custom agents, etc.) working in the same project directory.
+allinker is a **CLI-based collaboration gateway** designed for multiple AI Agent tools (such as Cline, CodeX, custom agents, etc.) working in the same project directory.
 
 When multiple agents operate in the same project independently, they commonly face:
 
@@ -20,7 +20,7 @@ When multiple agents operate in the same project independently, they commonly fa
 - **Information silos** — No direct communication between agents
 - **Untraceable operations** — Impossible to audit who did what and when
 
-ALLinker solves these with **four collaboration primitives**:
+allinker solves these with **four collaboration primitives**:
 
 | Primitive | What It Solves |
 |-----------|----------------|
@@ -37,7 +37,7 @@ ALLinker solves these with **four collaboration primitives**:
 
 ```bash
 git clone <repo-url>
-cd ALLinker
+cd allinker
 go build -o allinker.exe .
 ```
 
@@ -95,7 +95,7 @@ Agent A asks Agent B to complete a task. Agent A sets up a watchpoint to detect 
 
 ## Server Mode — Cross-Host LAN Collaboration
 
-ALLinker can run as a long-lived HTTP service, allowing agents across **different hosts on the same LAN** to call it over the network. This is the core mechanism for multi-machine team collaboration.
+allinker can run as a long-lived HTTP service, allowing agents across **different hosts on the same LAN** to call it over the network. This is the core mechanism for multi-machine team collaboration.
 
 ```bash
 # Start the server
@@ -134,12 +134,12 @@ This generates:
 
 | Binary | Platform |
 |--------|----------|
-| `ALLinker_windows_amd64.exe` | Windows x64 |
-| `ALLinker_windows_386.exe` | Windows x86 |
-| `ALLinker_linux_amd64` | Linux x64 |
-| `ALLinker_linux_arm64` | Linux ARM64 |
-| `ALLinker_darwin_amd64` | macOS Intel |
-| `ALLinker_darwin_arm64` | macOS Apple Silicon |
+| `allinker_windows_amd64.exe` | Windows x64 |
+| `allinker_windows_386.exe` | Windows x86 |
+| `allinker_linux_amd64` | Linux x64 |
+| `allinker_linux_arm64` | Linux ARM64 |
+| `allinker_darwin_amd64` | macOS Intel |
+| `allinker_darwin_arm64` | macOS Apple Silicon |
 
 ---
 

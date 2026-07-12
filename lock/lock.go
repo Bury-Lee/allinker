@@ -121,7 +121,6 @@ func ListLocks() []model.LockRecord {
 	return records
 }
 
-
 // StartCleanup 发送一次过期锁清理指令（不等待 SQLite 返回）。
 func StartCleanup() {
 	go func() {

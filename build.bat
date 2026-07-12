@@ -1,4 +1,4 @@
-:: ALLinker 跨平台编译脚本
+:: allinker 跨平台编译脚本
 :: 使用纯 Go SQLite 驱动，无需 CGO
 set GOPROXY=https://goproxy.cn,direct
 set GO111MODULE=on

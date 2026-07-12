@@ -1,4 +1,4 @@
-// cli_fix.go —— fix 命令处理
+﻿// cli_fix.go —— fix 命令处理
 // 检查和修复数据文件完整性。
 
 package cli
@@ -23,13 +23,13 @@ func handleFix(args []string, humanMode bool) {
 	checkOnly, _ := parseBoolArg(args, "--check")
 
 	if humanMode {
-		fmt.Println("🔍 ALLinker 数据完整性检查")
+		fmt.Println("allinker 数据完整性检查")
 		fmt.Println(strings.Repeat("─", 48))
 		if dryRun {
-			fmt.Println("⚠️  模拟运行模式（不会实际修复）")
+			fmt.Println("模拟运行模式（不会实际修复）")
 		}
 		if checkOnly {
-			fmt.Println("ℹ️   仅检查模式（不执行修复）")
+			fmt.Println("  仅检查模式（不执行修复）")
 		}
 		fmt.Println()
 	}
@@ -39,7 +39,7 @@ func handleFix(args []string, humanMode bool) {
 
 	// 1. 检查 users.json
 	if humanMode {
-		fmt.Print("📄 检查 users.json ... ")
+		fmt.Print("检查 users.json ... ")
 	}
 	ok, err := checkAndFixJSON(core.Global.UsersPath(), &model.UsersFile{}, humanMode)
 	if !ok {
@@ -48,19 +48,19 @@ func handleFix(args []string, humanMode bool) {
 			if fixUsersJSON(humanMode) {
 				fixed++
 				if humanMode {
-					fmt.Println("✅ 已修复")
+					fmt.Println("已修复")
 				}
 			}
 		} else if humanMode {
-			fmt.Println("❌ 有问题（需修复）")
+			fmt.Println("有问题（需修复）")
 		}
 	} else if err == nil && humanMode {
-		fmt.Println("✅ 正常")
+		fmt.Println("正常")
 	}
 
 	// 2. 检查 config.json
 	if humanMode {
-		fmt.Print("📄 检查 config.json ... ")
+		fmt.Print("检查 config.json ... ")
 	}
 	ok, err = checkAndFixJSON(core.Global.ConfigPath(), &model.AppConfig{}, humanMode)
 	if !ok {
@@ -69,19 +69,19 @@ func handleFix(args []string, humanMode bool) {
 			if fixConfigJSON(humanMode) {
 				fixed++
 				if humanMode {
-					fmt.Println("✅ 已修复")
+					fmt.Println("已修复")
 				}
 			}
 		} else if humanMode {
-			fmt.Println("❌ 有问题（需修复）")
+			fmt.Println("有问题（需修复）")
 		}
 	} else if err == nil && humanMode {
-		fmt.Println("✅ 正常")
+		fmt.Println("正常")
 	}
 
 	// 3. 检查 counter.json
 	if humanMode {
-		fmt.Print("📄 检查 counter.json ... ")
+		fmt.Print("检查 counter.json ... ")
 	}
 	ok, err = checkAndFixJSON(core.Global.CounterPath(), &model.Counter{}, humanMode)
 	if !ok {
@@ -90,40 +90,40 @@ func handleFix(args []string, humanMode bool) {
 			if fixCounterJSON(humanMode) {
 				fixed++
 				if humanMode {
-					fmt.Println("✅ 已修复")
+					fmt.Println("已修复")
 				}
 			}
 		} else if humanMode {
-			fmt.Println("❌ 有问题（需修复）")
+			fmt.Println("有问题（需修复）")
 		}
 	} else if err == nil && humanMode {
-		fmt.Println("✅ 正常")
+		fmt.Println("正常")
 	}
 
 	// 4. 检查审计日志
 	if humanMode {
-		fmt.Print("📄 检查 Logs/ 目录 ... ")
+		fmt.Print("检查 Logs/ 目录 ... ")
 	}
 	if err := checkAuditLog(humanMode); err != nil {
 		issues++
 		if humanMode {
-			fmt.Printf("❌ %v\n", err)
+			fmt.Printf("%v\n", err)
 		}
 	} else if humanMode {
-		fmt.Println("✅ 正常")
+		fmt.Println("正常")
 	}
 
 	// 6. 检查 SQLite 数据库
 	if humanMode {
-		fmt.Print("🗄️  检查 SQLite 数据库 ... ")
+		fmt.Print("检查 SQLite 数据库 ... ")
 	}
 	if err := checkDatabase(humanMode); err != nil {
 		issues++
 		if humanMode {
-			fmt.Printf("❌ %v\n", err)
+			fmt.Printf("%v\n", err)
 		}
 	} else if humanMode {
-		fmt.Println("✅ 正常")
+		fmt.Println("正常")
 	}
 
 	// 报告汇总
@@ -131,11 +131,11 @@ func handleFix(args []string, humanMode bool) {
 		fmt.Println()
 		fmt.Println(strings.Repeat("─", 48))
 		if issues == 0 {
-			fmt.Println("✅ 所有数据文件正常，无需修复")
+			fmt.Println("所有数据文件正常，无需修复")
 		} else {
-			fmt.Printf("📊 发现 %d 个问题，已修复 %d 个\n", issues, fixed)
+			fmt.Printf("发现 %d 个问题，已修复 %d 个\n", issues, fixed)
 			if fixed < issues && !dryRun {
-				fmt.Println("⚠️  部分问题未能自动修复，请检查日志")
+				fmt.Println("部分问题未能自动修复，请检查日志")
 			}
 		}
 	}
@@ -249,7 +249,7 @@ func checkDatabase(humanMode bool) error {
 	var tableCount int
 	core.DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('messages', 'message_recipients', 'locks', 'watches')").Scan(&tableCount)
 	if tableCount < 4 && humanMode {
-		fmt.Printf("\n  ⚠️  预期 3 个表，实际找到 %d 个", tableCount)
+		fmt.Printf("\n  预期 3 个表，实际找到 %d 个", tableCount)
 	}
 	return nil
 }

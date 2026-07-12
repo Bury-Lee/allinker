@@ -1,4 +1,4 @@
-// cli_server.go — 中心服务模式处理(未完成)
+﻿// cli_server.go — 中心服务模式处理(未完成)
 
 package cli
 
@@ -49,11 +49,11 @@ func startServer(port int, daemon bool, humanMode bool) {
 	addr := fmt.Sprintf(":%d", port)
 
 	if humanMode {
-		fmt.Printf("🚀 Allinker 中心服务启动\n")
-		fmt.Printf("   📡 地址: http://127.0.0.1:%d\n", port)
-		fmt.Printf("   📂 数据目录: %s\n", core.Global.Root())
-		fmt.Printf("   ✅ 服务运行中 (PID: %d)\n", pid)
-		fmt.Printf("   ⏹️   按 Ctrl+C 停止\n\n")
+		fmt.Print("allinker 中心服务启动\n")
+		fmt.Printf("   地址: http://127.0.0.1:%d\n", port)
+		fmt.Printf("   数据目录: %s\n", core.Global.Root())
+		fmt.Printf("   服务运行中 (PID: %d)\n", pid)
+		fmt.Printf("    按 Ctrl+C 停止\n\n")
 	} else {
 		fmt.Printf("服务已启动 http://127.0.0.1:%d\n", port)
 	}
@@ -66,7 +66,7 @@ func startServer(port int, daemon bool, humanMode bool) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"service": "Allinker",
+			"service": "allinker",
 			"version": Version,
 			"status":  "running",
 		})
@@ -78,7 +78,7 @@ func startServer(port int, daemon bool, humanMode bool) {
 	}
 
 	if err := server.ListenAndServe(); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ 服务启动失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "服务启动失败: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -89,7 +89,7 @@ func stopServer(humanMode bool) {
 	data, err := os.ReadFile(pidPath)
 	if err != nil {
 		if humanMode {
-			fmt.Println("⚠️ 服务未在运行")
+			fmt.Println("服务未在运行")
 		}
 		return
 	}
@@ -105,8 +105,8 @@ func stopServer(humanMode bool) {
 	os.Remove(pidPath)
 
 	if humanMode {
-		fmt.Println("⏹️  正在停止服务...")
-		fmt.Println("✅ 服务已停止")
+		fmt.Println("正在停止服务...")
+		fmt.Println("服务已停止")
 	} else {
 		fmt.Println("服务已停止")
 	}
@@ -118,7 +118,7 @@ func showServerStatus(humanMode bool) {
 	data, err := os.ReadFile(pidPath)
 	if err != nil {
 		if humanMode {
-			fmt.Println("❌ 服务未在运行")
+			fmt.Println("服务未在运行")
 		} else {
 			fmt.Println("服务未运行")
 		}
@@ -128,8 +128,8 @@ func showServerStatus(humanMode bool) {
 	pid := 0
 	fmt.Sscanf(string(data), "%d", &pid)
 	if humanMode {
-		fmt.Printf("✅ 服务运行中 (PID: %d)\n", pid)
-		fmt.Printf("   📂 数据目录: %s\n", core.Global.Root())
+		fmt.Printf("服务运行中 (PID: %d)\n", pid)
+		fmt.Printf("   数据目录: %s\n", core.Global.Root())
 	} else {
 		fmt.Printf("服务运行中 (PID: %d)\n", pid)
 	}
@@ -484,7 +484,7 @@ func handleAPIHealth(w http.ResponseWriter, r *http.Request) {
 func handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"service":    "Allinker",
+		"service":    "allinker",
 		"version":    Version,
 		"status":     "running",
 		"dataDir":    core.Global.Root(),
@@ -533,7 +533,7 @@ func runClientMode(protocol, address string, args []string) {
 	body, _ := json.Marshal(reqBody)
 	resp, err := http.Post(baseURL+"/api/v1/command", "application/json", strings.NewReader(string(body)))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ 连接服务失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "连接服务失败: %v\n", err)
 		fmt.Fprintln(os.Stderr, "   请确认服务是否已启动 (allinker -server)")
 		os.Exit(1)
 	}
@@ -544,7 +544,7 @@ func runClientMode(protocol, address string, args []string) {
 	json.Unmarshal(respBody, &result)
 
 	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "❌ %s\n", result.Error)
+		fmt.Fprintf(os.Stderr, "%s\n", result.Error)
 		os.Exit(result.ExitCode)
 	}
 
