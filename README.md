@@ -202,6 +202,3 @@ Write operations use **atomic writes** (temp file → rename) to prevent data co
 
 [Apache License 2.0](LICENCE)
 
----
-
-*Want to contribute? See the [Contributing Guide](docs/CONTRIBUTING.md).*
