@@ -8,6 +8,10 @@
 
 [简体中文](docs/README.zh-CN.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md) · [Français](docs/README.fr.md)
 
+> **About this project** — [Plain-language explanation](docs/ABOUT.md) (for non-technical readers)
+>
+> **关于本项目** — [通俗说明](docs/ABOUT.zh-CN.md)（面向非技术读者）
+
 ---
 
 ## Overview

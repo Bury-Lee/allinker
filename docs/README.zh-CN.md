@@ -8,6 +8,8 @@
 
 [English](../README.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md)
 
+> **通俗说明** — [面向非技术读者的介绍](ABOUT.zh-CN.md)
+
 ---
 
 ## 概述
