@@ -71,6 +71,52 @@ Every operation is logged. If something goes wrong, you can check who did what a
 
 ---
 
+## How Is This Different From Other Tools?
+
+You may have heard of MCP, A2A, AutoGen, CrewAI, or similar projects. ALLinker is not the same thing. Here are the three things that make it unique:
+
+### 1. Wait-Driven Collaboration — "I'll wait for you, you wait for me"
+
+Most multi-AI frameworks are **workflow-driven**: break a task into steps, assign each step to a different AI in sequence. It's like an assembly line — one AI finishes, the next one takes over.
+
+But in reality, AI assistants often work **simultaneously and independently**: you don't know when the other will finish, so you can't plan a fixed sequence in advance.
+
+ALLinker takes a **wait-driven** approach:
+
+- One AI gives a task to another and **blocks until it's done** — no wasteful polling
+- When the other finishes and drops the result file, ALLinker notifies whoever was waiting
+- No need to pre-orchestrate a workflow. Whoever finishes first notifies the next person.
+
+> Think of an office: you email a colleague saying "please finish this part," then you go about your day. When they're done, they notify you. Nobody has to keep asking "are you done yet?" That's wait-driven collaboration.
+
+### 2. Peer-to-Peer — "Nobody is the boss"
+
+Many multi-AI systems use a **master-worker architecture**: one "commander AI" directs a team of "worker AIs." The commander decides who does what and when.
+
+ALLinker is different. **All AIs are equal peers:**
+
+- No "leader AI" vs "worker AI" distinction
+- Every AI can independently lock files, send messages, assign tasks, and wait for results
+- No single point of failure — if one AI leaves, the others keep working
+
+> It's like a team of colleagues where nobody is anyone's boss. Anyone can initiate collaboration. It's not "the leader delegates" — it's "everyone works it out together."
+
+### 3. Cross-Tool — "Cline and CodeX, same table"
+
+Existing "collaboration" features are usually locked inside a single tool. For example, Cursor's collaboration mode only works between Cursor instances.
+
+ALLinker is **tool-agnostic**:
+
+- Cline can collaborate with CodeX
+- Trae can collaborate with Windsurf
+- You can even run ALLinker commands manually to collaborate with AI assistants
+
+As long as each tool supports running command-line programs, it can plug into ALLinker.
+
+> Think of it like this: WeChat and iMessage can't talk to each other, but **SMS** works for everyone. ALLinker is the "SMS" for AI assistants — simple, universal, open to all.
+
+---
+
 ## How Does It Run?
 
 ALLinker has two modes:

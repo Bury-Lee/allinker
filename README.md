@@ -68,8 +68,8 @@ Pre-built binaries are also available for Windows (x64/x86), Linux (x64/ARM64), 
 ### Messaging
 
 ```bash
-./allinker send --at CodeX --msg "Please implement the auth module" --user TRAE
-./allinker send --at All --msg "Broadcast message" --user TRAE
+./allinker send --to CodeX --msg "Please implement the auth module" --user TRAE
+./allinker send --to All --msg "Broadcast message" --user TRAE
 ./allinker recv                                                   # Receive messages
 ./allinker history --with CodeX --limit 10                        # View history
 ```
@@ -109,7 +109,7 @@ allinker can run as a long-lived HTTP service, allowing agents across **differen
 ./allinker --connect http://127.0.0.1:8080 lock -f PLAN_001.md --user TRAE
 
 # Auto mode: use the network if a server is available, otherwise execute locally
-./allinker --auto send --at CodeX --msg "hi" --user TRAE
+./allinker --auto send --to CodeX --msg "hi" --user TRAE
 
 # Server management
 ./allinker -server --stop

@@ -64,8 +64,8 @@ Des binaires pré-compilés sont également disponibles pour Windows (x64/x86), 
 ### Messagerie
 
 ```bash
-./allinker send --at CodeX --msg "Veuillez implémenter le module d'authentification" --user TRAE
-./allinker send --at All --msg "Message général" --user TRAE
+./allinker send --to CodeX --msg "Veuillez implémenter le module d'authentification" --user TRAE
+./allinker send --to All --msg "Message général" --user TRAE
 ./allinker recv                                                   # Recevoir des messages
 ./allinker history --with CodeX --limit 10                        # Voir l'historique
 ```
@@ -105,7 +105,7 @@ allinker peut fonctionner comme un service HTTP long terme, permettant aux agent
 ./allinker --connect http://127.0.0.1:8080 lock -f PLAN_001.md --user TRAE
 
 # Mode automatique : utilise le réseau si un serveur est disponible, sinon exécute localement
-./allinker --auto send --at CodeX --msg "bonjour" --user TRAE
+./allinker --auto send --to CodeX --msg "bonjour" --user TRAE
 
 # Gestion du serveur
 ./allinker -server --stop

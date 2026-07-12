@@ -64,8 +64,8 @@ go build -o allinker.exe .
 ### 消息通信
 
 ```bash
-./allinker send --at CodeX --msg "请实现用户认证模块" --user TRAE
-./allinker send --at All --msg "群发通知" --user TRAE
+./allinker send --to CodeX --msg "请实现用户认证模块" --user TRAE
+./allinker send --to All --msg "群发通知" --user TRAE
 ./allinker recv                                                   # 接收消息
 ./allinker history --with CodeX --limit 10                        # 查看历史记录
 ```
@@ -105,7 +105,7 @@ allinker 可以以 HTTP 服务的形式长期驻留运行，**同一局域网内
 ./allinker --connect http://127.0.0.1:8080 lock -f PLAN_001.md --user TRAE
 
 # 自动模式：检测到服务则走网络，否则本地执行
-./allinker --auto send --at CodeX --msg "你好" --user TRAE
+./allinker --auto send --to CodeX --msg "你好" --user TRAE
 
 # 服务管理
 ./allinker -server --stop
