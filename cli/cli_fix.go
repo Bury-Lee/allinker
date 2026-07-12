@@ -18,11 +18,11 @@ import (
 
 // handleFix 处理 fix 命令。
 // 用法: allinker fix [--check] [--dry-run] [--user <用户名>]
-func handleFix(args []string, humanMode bool) {
-	dryRun, _ := parseBoolArg(args, "--dry-run")
-	checkOnly, _ := parseBoolArg(args, "--check")
+func handleFix(cmd *CommandArg) error {
+	dryRun := cmd.DryRun
+	checkOnly := cmd.Check
 
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Println("allinker 数据完整性检查")
 		fmt.Println(strings.Repeat("─", 48))
 		if dryRun {
@@ -38,96 +38,96 @@ func handleFix(args []string, humanMode bool) {
 	fixed := 0
 
 	// 1. 检查 users.json
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Print("检查 users.json ... ")
 	}
-	ok, err := checkAndFixJSON(core.Global.UsersPath(), &model.UsersFile{}, humanMode)
+	ok, err := checkAndFixJSON(core.Global.UsersPath(), &model.UsersFile{}, cmd.HumanMode)
 	if !ok {
 		issues++
 		if !checkOnly {
-			if fixUsersJSON(humanMode) {
+			if fixUsersJSON(cmd.HumanMode) {
 				fixed++
-				if humanMode {
+				if cmd.HumanMode {
 					fmt.Println("已修复")
 				}
 			}
-		} else if humanMode {
+		} else if cmd.HumanMode {
 			fmt.Println("有问题（需修复）")
 		}
-	} else if err == nil && humanMode {
+	} else if err == nil && cmd.HumanMode {
 		fmt.Println("正常")
 	}
 
 	// 2. 检查 config.json
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Print("检查 config.json ... ")
 	}
-	ok, err = checkAndFixJSON(core.Global.ConfigPath(), &model.AppConfig{}, humanMode)
+	ok, err = checkAndFixJSON(core.Global.ConfigPath(), &model.AppConfig{}, cmd.HumanMode)
 	if !ok {
 		issues++
 		if !checkOnly {
-			if fixConfigJSON(humanMode) {
+			if fixConfigJSON(cmd.HumanMode) {
 				fixed++
-				if humanMode {
+				if cmd.HumanMode {
 					fmt.Println("已修复")
 				}
 			}
-		} else if humanMode {
+		} else if cmd.HumanMode {
 			fmt.Println("有问题（需修复）")
 		}
-	} else if err == nil && humanMode {
+	} else if err == nil && cmd.HumanMode {
 		fmt.Println("正常")
 	}
 
 	// 3. 检查 counter.json
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Print("检查 counter.json ... ")
 	}
-	ok, err = checkAndFixJSON(core.Global.CounterPath(), &model.Counter{}, humanMode)
+	ok, err = checkAndFixJSON(core.Global.CounterPath(), &model.Counter{}, cmd.HumanMode)
 	if !ok {
 		issues++
 		if !checkOnly {
-			if fixCounterJSON(humanMode) {
+			if fixCounterJSON(cmd.HumanMode) {
 				fixed++
-				if humanMode {
+				if cmd.HumanMode {
 					fmt.Println("已修复")
 				}
 			}
-		} else if humanMode {
+		} else if cmd.HumanMode {
 			fmt.Println("有问题（需修复）")
 		}
-	} else if err == nil && humanMode {
+	} else if err == nil && cmd.HumanMode {
 		fmt.Println("正常")
 	}
 
 	// 4. 检查审计日志
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Print("检查 Logs/ 目录 ... ")
 	}
-	if err := checkAuditLog(humanMode); err != nil {
+	if err := checkAuditLog(cmd.HumanMode); err != nil {
 		issues++
-		if humanMode {
+		if cmd.HumanMode {
 			fmt.Printf("%v\n", err)
 		}
-	} else if humanMode {
+	} else if cmd.HumanMode {
 		fmt.Println("正常")
 	}
 
 	// 6. 检查 SQLite 数据库
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Print("检查 SQLite 数据库 ... ")
 	}
-	if err := checkDatabase(humanMode); err != nil {
+	if err := checkDatabase(cmd.HumanMode); err != nil {
 		issues++
-		if humanMode {
+		if cmd.HumanMode {
 			fmt.Printf("%v\n", err)
 		}
-	} else if humanMode {
+	} else if cmd.HumanMode {
 		fmt.Println("正常")
 	}
 
 	// 报告汇总
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Println()
 		fmt.Println(strings.Repeat("─", 48))
 		if issues == 0 {
@@ -139,6 +139,7 @@ func handleFix(args []string, humanMode bool) {
 			}
 		}
 	}
+	return nil
 }
 
 // checkAndFixJSON 检查 JSON 文件是否可读且结构有效。

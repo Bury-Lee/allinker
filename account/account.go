@@ -4,6 +4,11 @@
 //  1. 账户是否存在
 //  2. 账户是否被禁用
 //  3. 角色权限（由调用方检查）
+//
+// 设计决策：
+// - 数据存储在 users.json 而非 SQLite：用户数据低频变更，JSON 可直接人工编辑
+// - 角色三级制（admin/agent/guest）：覆盖管理/协作/只读三种场景
+// - 数字 ID 用于位图下标：消息已读状态用位图标记，需要连续整数 ID
 package account
 
 import (
@@ -16,8 +21,49 @@ import (
 	"allinker/model"
 )
 
+// =============================================================================
+// 共享 Handler — 方案C：CLI 和 Server 共用
+// =============================================================================
+
+// RegisterParams register 命令的共享参数结构体。
+type RegisterParams struct {
+	Name        string
+	Role        model.UserRole
+	Description string
+}
+
+// UserManageParams user disable/enable/delete 的共享参数。
+type UserManageParams struct {
+	Target   string
+	Reason   string
+	Operator string
+}
+
+// HandleRegister 是 register 的共享处理函数。
+func HandleRegister(p RegisterParams) (*model.User, error) {
+	return Register(p.Name, p.Role, p.Description)
+}
+
+// HandleDisable 是 user disable 的共享处理函数。
+func HandleDisable(p UserManageParams) error {
+	return DisableUser(p.Target, p.Reason, p.Operator)
+}
+
+// HandleEnable 是 user enable 的共享处理函数。
+func HandleEnable(p UserManageParams) error {
+	return EnableUser(p.Target, p.Operator)
+}
+
+// HandleDelete 是 user delete 的共享处理函数。
+func HandleDelete(p UserManageParams) error {
+	return DeleteUser(p.Target, p.Operator)
+}
+
 // Register 创建一个新的用户账户。
-func Register(name string, role model.UserRole) (*model.User, error) {
+// name 会被 TrimSpace 处理。role 为空时默认为 agent。
+// description 为可选的岗位描述文本（如"后端开发"）。
+// 注册的同时会写入一条审计日志。
+func Register(name string, role model.UserRole, description string) (*model.User, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("username cannot be empty")
@@ -44,12 +90,13 @@ func Register(name string, role model.UserRole) (*model.User, error) {
 	}
 
 	user := &model.User{
-		ID:      id,
-		Name:    name,
-		Role:    role,
-		Created: time.Now().UTC().Format(time.RFC3339),
-		Status:  model.UserStatusActive,
-		Meta:    make(map[string]string),
+		ID:          id,
+		Name:        name,
+		Role:        role,
+		Description: description,
+		Created:     time.Now().UTC().Format(time.RFC3339),
+		Status:      model.UserStatusActive,
+		Meta:        make(map[string]string),
 	}
 	users.Users[name] = user
 
@@ -69,6 +116,8 @@ func Register(name string, role model.UserRole) (*model.User, error) {
 }
 
 // VerifyUser 检查用户是否存在且未被禁用。
+// 用户名不区分大小写（由存储层保证）。
+// 返回 *User 供调用方进一步检查角色权限。
 func VerifyUser(username string) (*model.User, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -102,7 +151,8 @@ func VerifyUser(username string) (*model.User, error) {
 }
 
 // CheckRole 验证用户是否至少具有所要求的角色等级。
-// 角色层级：admin > agent > guest。
+// 角色层级权重：admin=3, agent=2, guest=1。
+// 如果用户角色或要求角色不在已知列表中返回 false。
 func CheckRole(user *model.User, requiredRole model.UserRole) bool {
 	roleLevel := map[model.UserRole]int{
 		model.RoleAdmin: 3,

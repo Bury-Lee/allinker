@@ -1,5 +1,10 @@
-﻿// Package wait 提供等待文件出现和消息到达的功能。
+// Package wait 提供等待文件出现和消息到达的功能。
 // wait 命令会阻塞当前进程，直到条件满足或超时。
+//
+// 架构（任务 B 升级）：
+// - WaitService 封装所有等待相关业务方法
+// - AppWait 是全局单例，CLI handler 和 Server handler 共用
+// - 旧的 WaitForFile/WaitForMessage 保留为包级函数，内部转调 AppWait 对应方法
 package wait
 
 import (
@@ -12,8 +17,48 @@ import (
 	"time"
 
 	"allinker/config"
-	"allinker/core"
+	"allinker/model"
+
+	"gorm.io/gorm"
 )
+
+// =============================================================================
+// WaitService — 业务封装（任务B：Service 化）
+// =============================================================================
+
+// WaitService 封装所有等待相关业务方法。
+// 设计参考 GOblog 的 service 包模式。
+// 字段: db *gorm.DB（用于消息轮询）、getConfig func() (*model.AppConfig, error)（便于 mock）
+type WaitService struct {
+	db        *gorm.DB
+	getConfig func() (*model.AppConfig, error)
+}
+
+// NewWaitService 构造 WaitService。
+// 参数: db — GORM 数据库实例（消息轮询用）
+// 返回: *WaitService — 新实例
+func NewWaitService(db *gorm.DB) *WaitService {
+	return &WaitService{
+		db:        db,
+		getConfig: config.GetConfig,
+	}
+}
+
+// AppWait 是 WaitService 的全局单例。
+// 注意：必须在 core.DB 初始化完成后调用 wait.InitService(core.DB) 初始化。
+var AppWait *WaitService
+
+// InitService 初始化全局 AppWait 单例。
+// 参数: db — GORM 数据库实例（通常传 core.DB）
+// 返回: error — 当前保留为 nil
+func InitService(db *gorm.DB) error {
+	AppWait = NewWaitService(db)
+	return nil
+}
+
+// =============================================================================
+// 业务函数（包级 + Service method）
+// =============================================================================
 
 // WaitForFile 等待指定目录下匹配模式的文件出现或变更。
 // 参数：
@@ -27,7 +72,15 @@ import (
 //   - matchedFile: 匹配到的文件路径
 //   - elapsed: 等待耗时（秒）
 //   - err: 超时或其他错误
+//
+// TODO:同样,这种简单封装只会徒增复杂度,没有任何实际意义
+// 任务B升级：包级函数保留，内部转调 AppWait.WaitForFile。
 func WaitForFile(dir, pattern string, timeout int, printContent bool, watchMode string) (matchedFile string, elapsed int, err error) {
+	return AppWait.WaitForFile(dir, pattern, timeout, printContent, watchMode)
+}
+
+// WaitForFile 是 WaitService 的方法版本。
+func (s *WaitService) WaitForFile(dir, pattern string, timeout int, printContent bool, watchMode string) (matchedFile string, elapsed int, err error) {
 	if dir == "" {
 		return "", 0, fmt.Errorf("目录不能为空")
 	}
@@ -45,15 +98,15 @@ func WaitForFile(dir, pattern string, timeout int, printContent bool, watchMode 
 	deadline := startTime.Add(time.Duration(timeout) * time.Second)
 
 	if watchMode == "modify" {
-		return waitForFileModify(dir, pattern, startTime, deadline, printContent)
+		return s.waitForFileModify(dir, pattern, startTime, deadline, printContent)
 	}
 
 	// 默认模式：等待文件出现
-	return waitForFileAppear(dir, pattern, startTime, deadline, timeout, printContent)
+	return s.waitForFileAppear(dir, pattern, startTime, deadline, timeout, printContent)
 }
 
 // waitForFileAppear 等待新文件出现（轮询 Glob 模式）。
-func waitForFileAppear(dir, pattern string, startTime, deadline time.Time, timeout int, printContent bool) (matchedFile string, elapsed int, err error) {
+func (s *WaitService) waitForFileAppear(dir, pattern string, startTime, deadline time.Time, timeout int, printContent bool) (matchedFile string, elapsed int, err error) {
 	// 先检查一次
 	matches, _ := filepath.Glob(filepath.Join(dir, pattern))
 	if len(matches) > 0 {
@@ -88,7 +141,7 @@ func waitForFileAppear(dir, pattern string, startTime, deadline time.Time, timeo
 }
 
 // waitForFileModify 监听现有文件的内容变更（通过 MD5 哈希对比）。
-func waitForFileModify(dir, pattern string, startTime, deadline time.Time, printContent bool) (matchedFile string, elapsed int, err error) {
+func (s *WaitService) waitForFileModify(dir, pattern string, startTime, deadline time.Time, printContent bool) (matchedFile string, elapsed int, err error) {
 	// 计算初始文件哈希
 	prevHashes := make(map[string]string)
 	matches, _ := filepath.Glob(filepath.Join(dir, pattern))
@@ -178,12 +231,20 @@ func printFileContent(path string) {
 //   - content: 所有新消息的内容拼接（每条一行）
 //   - elapsed: 等待耗时（秒）
 //   - err: 超时或其他错误
+//
+// TODO:同样
+// 任务B升级：包级函数保留，内部转调 AppWait.WaitForMessage。
 func WaitForMessage(who string, timeoutSec int) (content string, elapsed int, err error) {
-	cfg, cfgErr := config.GetConfig()
+	return AppWait.WaitForMessage(who, timeoutSec)
+}
+
+// WaitForMessage 是 WaitService 的方法版本。
+func (s *WaitService) WaitForMessage(who string, timeoutSec int) (content string, elapsed int, err error) {
+	cfg, cfgErr := s.getConfig()
 	if timeoutSec <= 0 {
 		timeoutSec = 60
-		if cfgErr == nil && cfg.DefaultWaitTimeout > 0 {
-			timeoutSec = cfg.DefaultWaitTimeout
+		if cfgErr == nil && cfg.Wait.DefaultTimeout > 0 {
+			timeoutSec = cfg.Wait.DefaultTimeout
 		}
 	}
 
@@ -192,7 +253,7 @@ func WaitForMessage(who string, timeoutSec int) (content string, elapsed int, er
 
 	// 先获取当前最新消息的 ID，后续只查询比它更新的消息
 	var lastID int64
-	core.DB.Table("messages").Select("COALESCE(MAX(id), 0)").Scan(&lastID)
+	s.db.Table("messages").Select("COALESCE(MAX(id), 0)").Scan(&lastID)
 
 	for {
 		if time.Now().After(deadline) {
@@ -206,7 +267,7 @@ func WaitForMessage(who string, timeoutSec int) (content string, elapsed int, er
 			Content    string
 		}
 		var msgs []msgRow
-		query := core.DB.Table("messages").
+		query := s.db.Table("messages").
 			Select("id, sender_name, content").
 			Where("id > ?", lastID)
 		if who != "" {

@@ -1,6 +1,11 @@
 // Package watch 提供文件监听位（Watch Point）的注册和管理功能。
 //
 // 所有数据（包括文件快照哈希）均存储在 SQLite 数据库中。
+//
+// 设计决策：
+// - 使用哈希快照对比而非 inotify/fsnotify：跨平台兼容，无需系统级权限
+// - 大文件采样哈希（头+中+尾各 2MB）：避免全量读取大文件
+// - 快照持久化到数据库：进程重启后无需重新扫描历史
 package watch
 
 import (
@@ -15,6 +20,44 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// =============================================================================
+// 共享 Handler — 方案C：CLI 和 Server 共用
+// =============================================================================
+
+// WatchAddParams watch add 命令的共享参数结构体。
+type WatchAddParams struct {
+	Name    string
+	Dir     string
+	Pattern string
+	Creator string
+}
+
+// WatchCheckParams watch check 的共享参数。
+type WatchCheckParams struct {
+	Name string
+}
+
+// WatchRemoveParams watch remove 的共享参数。
+type WatchRemoveParams struct {
+	Name     string
+	Username string
+}
+
+// HandleWatchAdd 是 watch add 的共享处理函数。
+func HandleWatchAdd(p WatchAddParams) (*model.WatchItem, error) {
+	return AddWatch(p.Name, p.Dir, p.Pattern, p.Creator)
+}
+
+// HandleWatchCheck 是 watch check 的共享处理函数。
+func HandleWatchCheck(p WatchCheckParams) ([]string, error) {
+	return CheckWatch(p.Name)
+}
+
+// HandleWatchRemove 是 watch remove 的共享处理函数。
+func HandleWatchRemove(p WatchRemoveParams) error {
+	return RemoveWatch(p.Name, p.Username)
+}
 
 // InitModels 注册监听相关的 GORM 模型到给定数据库实例。
 func InitModels(db *gorm.DB) error {

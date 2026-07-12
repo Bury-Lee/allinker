@@ -1,9 +1,20 @@
 // Package config 管理应用配置的读取和保存。
+//
+// 设计决策：
+// - 配置存储在 config.json（.alf 目录下），JSON 格式可人工编辑
+// - 每次 GetConfig 检查文件的 ModTime，文件没变返回缓存，变了重新读
+// - 优先级链：CLI 参数 > config.json > 硬编码默认值（同 Git 风格）
+//
+// 配置读取策略（类似 Git）：
+//   CLI 模式：每次命令执行是独立进程，必然重新读取文件
+//   Server 模式：常驻进程，通过 stat 检查文件 mtime 自动感知变更
+//   优先级：CLI 参数 > config.json > 硬编码默认值
 package config
 
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"allinker/core"
@@ -14,30 +25,62 @@ import (
 // DefaultConfig 返回默认的应用配置。
 func DefaultConfig() *model.AppConfig {
 	return &model.AppConfig{
-		LockTimeout:          60,
-		DefaultWaitTimeout:   60,
-		DefaultCheckInterval: 2,
-		MessageRetentionDays: 30,
-		MaxMessagesPerUser:   1000,
-		LogLevel:             "info",
-		AuditEnabled:         true,
+		Lock: model.LockConfig{
+			Timeout: 60,
+		},
+		Wait: model.WaitConfig{
+			DefaultTimeout: 60,
+			CheckInterval:  2,
+		},
+		Message: model.MessageConfig{
+			RetentionDays: 30,
+			MaxPerUser:    1000,
+		},
+		Log: model.LogConfig{
+			Level: "info",
+			Audit: true,
+		},
+		Server: model.ServerConfig{
+			Host:      "127.0.0.1",
+			Port:      8080,
+			AuthToken: "",
+			LogLevel:  "info",
+		},
 	}
 }
 
-// cachedConfig 避免每次访问都读取 config.json。
-var cachedConfig *model.AppConfig
+// 缓存 + stat 检查，Server 模式可感知文件变更
+var (
+	cachedConfig *model.AppConfig
+	cachedTime   time.Time
+	configMu     sync.Mutex
+)
 
-// GetConfig 读取并缓存应用配置。
+// GetConfig 读取应用配置。
+// CLI 模式下每次启动都重新读取（进程是新的，cache 为空）。
+// Server 模式下 stat 检查 mtime，文件变了自动重读。
 func GetConfig() (*model.AppConfig, error) {
-	if cachedConfig != nil {
-		return cachedConfig, nil
-	}
+	configMu.Lock()
+	defer configMu.Unlock()
+
 	if core.Global == nil {
 		return nil, fmt.Errorf("数据目录未初始化")
 	}
 
+	configPath := core.Global.ConfigPath()
+	fi, err := os.Stat(configPath)
+	if err != nil {
+		return DefaultConfig(), nil
+	}
+
+	// stat 检查：文件未变且缓存有效则复用
+	if cachedConfig != nil && fi.ModTime().Equal(cachedTime) {
+		return cachedConfig, nil
+	}
+
+	// 重新读取文件
 	cfg := &model.AppConfig{}
-	if err := core.Global.ReadJSON(core.Global.ConfigPath(), cfg); err != nil {
+	if err := core.Global.ReadJSON(configPath, cfg); err != nil {
 		if os.IsNotExist(err) {
 			cfg = DefaultConfig()
 		} else {
@@ -45,11 +88,15 @@ func GetConfig() (*model.AppConfig, error) {
 		}
 	}
 	cachedConfig = cfg
+	cachedTime = fi.ModTime()
 	return cfg, nil
 }
 
-// 预备函数:SaveConfig 持久化配置并更新缓存。
+// SaveConfig 持久化配置并更新缓存。
 func SaveConfig(cfg *model.AppConfig) error {
+	configMu.Lock()
+	defer configMu.Unlock()
+
 	if core.Global == nil {
 		return fmt.Errorf("数据目录未初始化")
 	}
@@ -57,7 +104,16 @@ func SaveConfig(cfg *model.AppConfig) error {
 		return fmt.Errorf("保存 config.json: %w", err)
 	}
 	cachedConfig = cfg
+	cachedTime = time.Now()
 	return nil
+}
+
+// Reload 清除配置缓存，下次 GetConfig 时重新读取文件。
+func Reload() {
+	configMu.Lock()
+	defer configMu.Unlock()
+	cachedConfig = nil
+	cachedTime = time.Time{}
 }
 
 // NextID 递增并返回全局计数器的 nextId。
@@ -118,7 +174,7 @@ func WriteJSON(path string, data any) error {
 // AppendAuditLog 记录一条审计日志到 Logs 目录的每日轮转文件。
 func AppendAuditLog(entry model.AuditEntry) error {
 	cfg, err := GetConfig()
-	if err == nil && !cfg.AuditEnabled {
+	if err == nil && !cfg.Log.Audit {
 		return nil
 	}
 	logutil.Audit(entry.User, entry.Action, entry.Target, entry.Result, entry.Detail)

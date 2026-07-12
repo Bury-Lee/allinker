@@ -3,7 +3,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"allinker/account"
@@ -12,66 +11,39 @@ import (
 )
 
 // handleUser 处理 user 子命令
-//
-// 用法:
-//
-//	allinker user list --user <用户名>
-//	allinker user log --name <目标用户> --user <用户名>
-//	allinker user disable --name <目标用户> --reason <原因> --user <用户名>
-//	allinker user enable --name <目标用户> --user <用户名>
-//	allinker user delete --name <目标用户> --user <用户名>
-func handleUser(args []string, humanMode bool) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "请指定 user 子命令: list, log, disable, enable, delete")
-		os.Exit(1)
-	}
-
-	subCmd := args[0]
-	subArgs := args[1:]
-
-	switch subCmd {
+func handleUser(cmd *CommandArg) error {
+	switch cmd.SubCommand {
 	case "list":
-		handleUserList(subArgs, humanMode)
+		return handleUserList(cmd)
 	case "log":
-		handleUserLog(subArgs, humanMode)
+		return handleUserLog(cmd)
 	case "disable":
-		handleUserDisable(subArgs, humanMode)
+		return handleUserDisable(cmd)
 	case "enable":
-		handleUserEnable(subArgs, humanMode)
+		return handleUserEnable(cmd)
 	case "delete":
-		handleUserDelete(subArgs, humanMode)
+		return handleUserDelete(cmd)
 	default:
-		fmt.Fprintf(os.Stderr, "未知 user 子命令: %s\n", subCmd)
-		fmt.Fprintln(os.Stderr, "   可用: list, log, disable, enable, delete")
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: fmt.Sprintf("未知 user 子命令: %s\n   可用: list, log, disable, enable, delete", cmd.SubCommand)}
 	}
 }
 
 // handleUserList 查看所有用户列表
-func handleUserList(args []string, humanMode bool) {
-	username, _ := requireUser(args)
-
-	// 检查 admin 权限
-	user, err := account.VerifyUser(username)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(4)
-	}
-	if !account.CheckRole(user, model.RoleAdmin) {
-		fmt.Fprintln(os.Stderr, "错误: 权限不足，仅管理员可查看用户列表")
-		os.Exit(5)
+func handleUserList(cmd *CommandArg) error {
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
 	}
 
 	users, err := account.ListUsers()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "查询用户列表失败: %v\n", err)
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: fmt.Sprintf("查询用户列表失败: %v", err)}
 	}
 
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Printf("用户列表 (%d)\n\n", len(users))
-		fmt.Printf("  角色    用户名    状态      注册时间\n")
-		fmt.Printf("  ──────────────────────────────────────\n")
+		fmt.Printf("  角色    用户名    描述                状态      注册时间\n")
+		fmt.Printf("  ─────────────────────────────────────────────────────────\n")
 		for _, u := range users {
 			statusStr := "正常"
 			extra := ""
@@ -86,8 +58,12 @@ func handleUserList(args []string, humanMode bool) {
 				created = created[:19]
 			}
 			created = strings.Replace(created, "T", " ", 1)
-			fmt.Printf("  %-7s %-8s %s%s\n", u.Role, u.Name, statusStr, extra)
-			fmt.Printf("                      %s%s\n", created, extra)
+			desc := u.Description
+			if desc == "" {
+				desc = "-"
+			}
+			fmt.Printf("  %-7s %-8s %-20s %s%s\n", u.Role, u.Name, desc, statusStr, extra)
+			fmt.Printf("                      %-20s %s%s\n", "", created, extra)
 		}
 	} else {
 		for _, u := range users {
@@ -95,44 +71,48 @@ func handleUserList(args []string, humanMode bool) {
 			if u.Status == model.UserStatusDisabled {
 				statusStr = "已禁用"
 			}
-			fmt.Printf("%s (%s, %s)\n", u.Name, u.Role, statusStr)
+			if u.Description != "" {
+				fmt.Printf("%s (%s, %s, %s)\n", u.Name, u.Role, u.Description, statusStr)
+			} else {
+				fmt.Printf("%s (%s, %s)\n", u.Name, u.Role, statusStr)
+			}
 		}
 	}
+	return nil
 }
 
 // handleUserLog 查看用户操作记录
-func handleUserLog(args []string, humanMode bool) {
-	targetName, remaining := parseStringArg(args, "--name", "")
-	username, remaining := requireUser(remaining)
+func handleUserLog(cmd *CommandArg) error {
+	targetName := cmd.Name
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
+	}
 
-	// 检查 admin 权限
 	user, err := account.VerifyUser(username)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(4)
+		return &CLIError{Code: 4, Msg: fmt.Sprintf("%v", err)}
 	}
 	if !account.CheckRole(user, model.RoleAdmin) {
-		fmt.Fprintln(os.Stderr, "错误: 权限不足，仅管理员可查看操作记录")
-		os.Exit(5)
+		return &CLIError{Code: 5, Msg: "错误: 权限不足，仅管理员可查看操作记录"}
 	}
 
 	if targetName == "" {
-		fmt.Fprintln(os.Stderr, "请使用 --name 指定目标用户")
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: "请使用 --name 指定目标用户"}
 	}
 
-	limit, _ := parseIntArg(remaining, "--limit", 50)
-	since, _ := parseStringArg(remaining, "--since", "")
-	actionType, _ := parseStringArg(remaining, "--type", "")
+	limit := cmd.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	since := cmd.Since
+	actionType := cmd.ActionType
 
-	// 读取审计日志
 	entries, err := initt.ReadAuditLog()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "读取审计日志失败: %v\n", err)
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: fmt.Sprintf("读取审计日志失败: %v", err)}
 	}
 
-	// 筛选
 	var filtered []model.AuditEntry
 	for _, entry := range entries {
 		if entry.User != targetName {
@@ -147,17 +127,16 @@ func handleUserLog(args []string, humanMode bool) {
 		filtered = append(filtered, entry)
 	}
 
-	// 取最近的 limit 条
 	if len(filtered) > limit {
 		filtered = filtered[len(filtered)-limit:]
 	}
 
 	if len(filtered) == 0 {
 		fmt.Printf("%s 没有操作记录\n", targetName)
-		return
+		return nil
 	}
 
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Printf("%s 的操作记录 (最近 %d 条", targetName, len(filtered))
 		if actionType != "" {
 			fmt.Printf(", 筛选: %s", actionType)
@@ -184,90 +163,100 @@ func handleUserLog(args []string, humanMode bool) {
 			fmt.Printf("%s %s %s %s\n", entry.Time, entry.Action, entry.Target, entry.Result)
 		}
 	}
+	return nil
 }
 
 // handleUserDisable 禁用账号
-func handleUserDisable(args []string, humanMode bool) {
-	targetName, remaining := parseStringArg(args, "--name", "")
-	reason, remaining := parseStringArg(remaining, "--reason", "")
-	username, _ := requireUser(remaining)
+func handleUserDisable(cmd *CommandArg) error {
+	targetName := cmd.Name
+	reason := cmd.Reason
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
+	}
 
-	// 检查 admin 权限
 	user, err := account.VerifyUser(username)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(4)
+		return &CLIError{Code: 4, Msg: fmt.Sprintf("%v", err)}
 	}
 	if !account.CheckRole(user, model.RoleAdmin) {
-		fmt.Fprintln(os.Stderr, "错误: 权限不足，仅管理员可禁用账号")
-		os.Exit(5)
+		return &CLIError{Code: 5, Msg: "错误: 权限不足，仅管理员可禁用账号"}
 	}
 	if targetName == "" {
-		fmt.Fprintln(os.Stderr, "请使用 --name 指定要禁用的用户")
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: "请使用 --name 指定要禁用的用户"}
 	}
 
-	err = account.DisableUser(targetName, reason, username)
+	err = account.HandleDisable(account.UserManageParams{
+		Target:   targetName,
+		Reason:   reason,
+		Operator: username,
+	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "禁用失败: %v\n", err)
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: fmt.Sprintf("禁用失败: %v", err)}
 	}
 
 	fmt.Printf("账号已禁用: %s\n", targetName)
+	return nil
 }
 
 // handleUserEnable 启用账号
-func handleUserEnable(args []string, humanMode bool) {
-	targetName, remaining := parseStringArg(args, "--name", "")
-	username, _ := requireUser(remaining)
+func handleUserEnable(cmd *CommandArg) error {
+	targetName := cmd.Name
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
+	}
 
 	user, err := account.VerifyUser(username)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(4)
+		return &CLIError{Code: 4, Msg: fmt.Sprintf("%v", err)}
 	}
 	if !account.CheckRole(user, model.RoleAdmin) {
-		fmt.Fprintln(os.Stderr, "错误: 权限不足，仅管理员可启用账号")
-		os.Exit(5)
+		return &CLIError{Code: 5, Msg: "错误: 权限不足，仅管理员可启用账号"}
 	}
 	if targetName == "" {
-		fmt.Fprintln(os.Stderr, "请使用 --name 指定要启用的用户")
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: "请使用 --name 指定要启用的用户"}
 	}
 
-	err = account.EnableUser(targetName, username)
+	err = account.HandleEnable(account.UserManageParams{
+		Target:   targetName,
+		Operator: username,
+	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "启用失败: %v\n", err)
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: fmt.Sprintf("启用失败: %v", err)}
 	}
 
 	fmt.Printf("账号已启用: %s\n", targetName)
+	return nil
 }
 
 // handleUserDelete 删除账号
-func handleUserDelete(args []string, humanMode bool) {
-	targetName, remaining := parseStringArg(args, "--name", "")
-	username, _ := requireUser(remaining)
+func handleUserDelete(cmd *CommandArg) error {
+	targetName := cmd.Name
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
+	}
 
 	user, err := account.VerifyUser(username)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(4)
+		return &CLIError{Code: 4, Msg: fmt.Sprintf("%v", err)}
 	}
 	if !account.CheckRole(user, model.RoleAdmin) {
-		fmt.Fprintln(os.Stderr, "错误: 权限不足，仅管理员可删除账号")
-		os.Exit(5)
+		return &CLIError{Code: 5, Msg: "错误: 权限不足，仅管理员可删除账号"}
 	}
 	if targetName == "" {
-		fmt.Fprintln(os.Stderr, "请使用 --name 指定要删除的用户")
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: "请使用 --name 指定要删除的用户"}
 	}
 
-	err = account.DeleteUser(targetName, username)
+	err = account.HandleDelete(account.UserManageParams{
+		Target:   targetName,
+		Operator: username,
+	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "删除失败: %v\n", err)
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: fmt.Sprintf("删除失败: %v", err)}
 	}
 
 	fmt.Printf("账号已删除: %s\n", targetName)
+	return nil
 }

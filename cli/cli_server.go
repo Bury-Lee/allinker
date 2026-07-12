@@ -1,4 +1,4 @@
-﻿// cli_server.go — 中心服务模式处理(未完成)
+﻿// cli_server.go — 中心服务模式处理
 
 package cli
 
@@ -8,27 +8,34 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
-	"allinker/account"
+	"allinker/config"
 	"allinker/core"
 	initt "allinker/init"
-	lockpkg "allinker/lock"
-	msgpkg "allinker/message"
-	"allinker/model"
-	"allinker/wait"
-	"allinker/watch"
+	"allinker/logutil"
+	"allinker/utils"
 )
 
 // runServerMode 启动中心服务模式
-func runServerMode(port int, daemon, stop, status, restart bool, humanMode bool) {
+func runServerMode(port int, stop, status, restart bool, humanMode bool) {
+	// 禁止嵌套 -r：如果通过远程连接发送 -server 指令，拒绝执行
+	if os.Getenv("allinker_REMOTE_ACTIVE") != "" {
+		fmt.Fprintln(os.Stderr, "错误: 不允许在远程连接中启动服务模式")
+		os.Exit(1)
+	}
 	if stop {
 		stopServer(humanMode)
 		return
 	}
 	if status {
-		showServerStatus(humanMode)
+		if err := showServerStatus(humanMode); err != nil {
+			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 	if restart {
@@ -36,33 +43,67 @@ func runServerMode(port int, daemon, stop, status, restart bool, humanMode bool)
 		time.Sleep(1 * time.Second)
 	}
 
-	startServer(port, daemon, humanMode)
+	if err := startServer(port, humanMode); err != nil {
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+		os.Exit(1)
+	}
 }
 
-// startServer 启动 HTTP 服务
-func startServer(port int, daemon bool, humanMode bool) {
-	// 写入 PID 文件
-	pidPath := core.Global.ServerPIDPath()
-	pid := os.Getpid()
-	os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", pid)), 0644)
+// startServer 启动 HTTP 服务（使用 lock 文件替代 PID）
+// 返回 error 表示启动失败；启动成功后阻塞直到服务退出。
+func startServer(port int, humanMode bool) error {
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return fmt.Errorf("读取配置失败: %w", err)
+	}
 
-	addr := fmt.Sprintf(":%d", port)
+	host := cfg.Server.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	serverPort := cfg.Server.Port
+	if serverPort == 0 {
+		serverPort = 8080
+	}
+	if port > 0 {
+		serverPort = port
+	}
+
+	addr := fmt.Sprintf("%s:%d", host, serverPort)
+
+	lockPath := filepath.Join(core.Global.Root(), "server.lock")
+	lockFile, err := tryAcquireServerLock(lockPath)
+	if err != nil {
+		return fmt.Errorf("%w\n   使用 allinker -server --stop 停止", err)
+	}
+	defer func() {
+		lockFile.Close()
+		os.Remove(lockPath)
+	}()
+	fmt.Fprintf(lockFile, "%d", os.Getpid())
+	lockFile.Sync()
+
+	pid := os.Getpid()
 
 	if humanMode {
 		fmt.Print("allinker 中心服务启动\n")
-		fmt.Printf("   地址: http://127.0.0.1:%d\n", port)
+		fmt.Printf("   地址: http://%s\n", addr)
 		fmt.Printf("   数据目录: %s\n", core.Global.Root())
 		fmt.Printf("   服务运行中 (PID: %d)\n", pid)
+		if cfg.Server.AuthToken != "" {
+			fmt.Printf("   密码已启用\n")
+		}
 		fmt.Printf("    按 Ctrl+C 停止\n\n")
 	} else {
-		fmt.Printf("服务已启动 http://127.0.0.1:%d\n", port)
+		fmt.Printf("服务已启动 http://%s\n", addr)
 	}
 
-	// 注册路由
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/command", handleAPICommand)
-	mux.HandleFunc("/api/v1/health", handleAPIHealth)
-	mux.HandleFunc("/api/v1/status", handleAPIStatus)
+	mux.HandleFunc("/api/v1/command", withAuth(withLog(handleAPICommand)))
+	mux.HandleFunc("/api/v1/health", withLog(handleAPIHealth))
+	mux.HandleFunc("/api/v1/status", withLog(handleAPIStatus))
+	mux.HandleFunc("/api/v1/reload", withAuth(withLog(handleAPIReload)))
+	mux.HandleFunc("/api/v1/info", withLog(handleAPIInfo))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
@@ -77,19 +118,30 @@ func startServer(port int, daemon bool, humanMode bool) {
 		Handler: mux,
 	}
 
+	// 正常退出时清理 lock 文件
+	// 注意：os.Exit 或 SIGKILL 不会执行到这里，lock 文件会残留
+	// 方案：下次启动时检测 lock 文件中的 pid 是否存活，若已死则覆盖
+
 	if err := server.ListenAndServe(); err != nil {
-		fmt.Fprintf(os.Stderr, "服务启动失败: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("服务启动失败: %w", err)
 	}
+
+	// 退出时清理 lock 文件
+	os.Remove(lockPath)
+	lockFile.Close()
+
+	return nil
 }
 
-// stopServer 停止服务
+// stopServer 停止服务（通过 lock 文件）
 func stopServer(humanMode bool) {
-	pidPath := core.Global.ServerPIDPath()
-	data, err := os.ReadFile(pidPath)
+	lockPath := filepath.Join(core.Global.Root(), "server.lock")
+	data, err := os.ReadFile(lockPath)
 	if err != nil {
 		if humanMode {
 			fmt.Println("服务未在运行")
+		} else {
+			fmt.Println("服务未运行")
 		}
 		return
 	}
@@ -102,7 +154,7 @@ func stopServer(humanMode bool) {
 			proc.Kill()
 		}
 	}
-	os.Remove(pidPath)
+	os.Remove(lockPath)
 
 	if humanMode {
 		fmt.Println("正在停止服务...")
@@ -112,17 +164,18 @@ func stopServer(humanMode bool) {
 	}
 }
 
-// showServerStatus 查看服务状态
-func showServerStatus(humanMode bool) {
-	pidPath := core.Global.ServerPIDPath()
-	data, err := os.ReadFile(pidPath)
+// showServerStatus 查看服务状态（通过 lock 文件）
+// 返回 error 表示服务未运行或读取失败；成功时输出状态信息到 stdout。
+func showServerStatus(humanMode bool) error {
+	lockPath := filepath.Join(core.Global.Root(), "server.lock")
+	data, err := os.ReadFile(lockPath)
 	if err != nil {
 		if humanMode {
 			fmt.Println("服务未在运行")
 		} else {
 			fmt.Println("服务未运行")
 		}
-		os.Exit(1)
+		return fmt.Errorf("服务未运行")
 	}
 
 	pid := 0
@@ -133,19 +186,12 @@ func showServerStatus(humanMode bool) {
 	} else {
 		fmt.Printf("服务运行中 (PID: %d)\n", pid)
 	}
+	return nil
 }
 
 // =============================================================================
 // HTTP API 处理函数
 // =============================================================================
-
-// apiCommandRequest API 命令请求体
-type apiCommandRequest struct {
-	ID      string         `json:"id,omitempty"`
-	Command string         `json:"command"`
-	Args    map[string]any `json:"args"`
-	Async   bool           `json:"async,omitempty"`
-}
 
 // apiCommandResponse API 命令响应体
 type apiCommandResponse struct {
@@ -156,7 +202,16 @@ type apiCommandResponse struct {
 	ExitCode int    `json:"exitCode,omitempty"`
 }
 
+// cmdResult executeCommand 的返回结果
+type cmdResult struct {
+	Success  bool
+	Data     string
+	Error    string
+	ExitCode int
+}
+
 // handleAPICommand 处理 POST /api/v1/command 请求
+// 使用 CommandArg 统一结构体，不再需要 mapToArgs/parseArgsToMap 转换。
 func handleAPICommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -169,14 +224,29 @@ func handleAPICommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req apiCommandRequest
+	var req struct {
+		ID      string      `json:"id"`
+		Command string      `json:"command"`
+		Args    *CommandArg `json:"args"`
+		Async   bool        `json:"async"`
+	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, apiCommandResponse{Error: "解析 JSON 失败"})
 		return
 	}
 
-	// 执行命令（同步模式，目前不支持异步）
-	result := executeCommand(req.Command, req.Args)
+	cmd := req.Args
+
+	// 指令过滤：禁止远程客户端执行全局服务指令
+	if cmd == nil {
+		cmd = &CommandArg{}
+	}
+	if req.Command != "" {
+		cmd.Command = req.Command
+	}
+
+	// 执行命令（同步模式）
+	result := ExecuteParsedResult(cmd)
 
 	writeJSON(w, http.StatusOK, apiCommandResponse{
 		ID:       req.ID,
@@ -185,293 +255,6 @@ func handleAPICommand(w http.ResponseWriter, r *http.Request) {
 		Error:    result.Error,
 		ExitCode: result.ExitCode,
 	})
-}
-
-// cmdResult executeCommand 的返回结果
-type cmdResult struct {
-	Success  bool
-	Data     string
-	Error    string
-	ExitCode int
-}
-
-// executeCommand 根据命令名和参数执行对应的逻辑
-func executeCommand(cmd string, args map[string]any) cmdResult {
-	switch cmd {
-	case "register":
-		name, _ := args["name"].(string)
-		role, _ := args["role"].(string)
-		if role == "" {
-			role = "agent"
-		}
-		user, err := account.Register(name, model.UserRole(role))
-		if err != nil {
-			return cmdResult{Error: err.Error(), ExitCode: 1}
-		}
-		return cmdResult{Success: true, Data: fmt.Sprintf("账号已注册: %s", user.Name)}
-
-	case "lock":
-		filename, _ := args["file"].(string)
-		username, _ := args["user"].(string)
-		timeout := 60
-		if t, ok := args["timeout"].(float64); ok {
-			timeout = int(t)
-		}
-		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-		err := lockpkg.AcquireLock(filename, username, deadline)
-		if err != nil {
-			return cmdResult{Error: err.Error(), ExitCode: 3}
-		}
-		return cmdResult{Success: true, Data: "锁获取成功"}
-
-	case "send":
-		from, _ := args["user"].(string)
-		toStr, _ := args["to"].(string)
-		content, _ := args["msg"].(string)
-		toList := strings.Split(toStr, ",")
-		msg, err := msgpkg.SendMessage(from, toList, content)
-		if err != nil {
-			return cmdResult{Error: err.Error(), ExitCode: 1}
-		}
-		return cmdResult{Success: true, Data: fmt.Sprintf("消息已发送 (ID: %d)", msg.ID)}
-
-	case "recv":
-		from, _ := args["from"].(string)
-		user, _ := args["user"].(string)
-		messages, err := msgpkg.ReceiveMessages(from, user, false, 0)
-		if err != nil {
-			return cmdResult{Error: err.Error(), ExitCode: 1}
-		}
-		if len(messages) == 0 {
-			return cmdResult{Success: true, Data: "没有未读消息"}
-		}
-		var parts []string
-		for _, msg := range messages {
-			parts = append(parts, fmt.Sprintf("%s: %s", msg.From, msg.Content))
-		}
-		return cmdResult{Success: true, Data: strings.Join(parts, "\n")}
-
-	case "status":
-		return cmdResult{Success: true, Data: "服务运行中"}
-
-	case "unlock":
-		filename, _ := args["file"].(string)
-		username, _ := args["user"].(string)
-		if filename == "" || username == "" {
-			return cmdResult{Error: "参数缺失: --file 和 --user 是必需的", ExitCode: 1}
-		}
-		err := lockpkg.ReleaseLock(filename, username)
-		if err != nil {
-			return cmdResult{Error: err.Error(), ExitCode: 1}
-		}
-		return cmdResult{Success: true, Data: "锁已释放"}
-
-	case "tryLock":
-		filename, _ := args["file"].(string)
-		username, _ := args["user"].(string)
-		if filename == "" || username == "" {
-			return cmdResult{Error: "参数缺失: --file 和 --user 是必需的", ExitCode: 1}
-		}
-		err := lockpkg.TryAcquireLock(filename, username)
-		if err != nil {
-			return cmdResult{Error: err.Error(), ExitCode: 3}
-		}
-		return cmdResult{Success: true, Data: "锁获取成功"}
-
-	case "lockInfo":
-		filename, _ := args["file"].(string)
-		if filename == "" {
-			return cmdResult{Error: "参数缺失: --file 是必需的", ExitCode: 1}
-		}
-		info := lockpkg.GetLockInfo(filename)
-		if info == nil || info.IsExpired() {
-			return cmdResult{Success: true, Data: fmt.Sprintf("文件 %s 没有被锁定", filename)}
-		}
-		return cmdResult{Success: true, Data: fmt.Sprintf("持有者: %s, 剩余时间: %d秒", info.Holder, info.RemainingSeconds())}
-
-	case "listLocks":
-		locks := lockpkg.ListLocks()
-		if len(locks) == 0 {
-			return cmdResult{Success: true, Data: "没有活动的锁"}
-		}
-		var parts []string
-		for _, l := range locks {
-			status := "有效"
-			if l.IsExpired() {
-				status = "已过期"
-			}
-			parts = append(parts, fmt.Sprintf("%s | %s | %s", l.Filename, l.Holder, status))
-		}
-		return cmdResult{Success: true, Data: strings.Join(parts, "\n")}
-
-	case "user":
-		sub, _ := args["sub"].(string)
-		username, _ := args["user"].(string)
-		target, _ := args["name"].(string)
-		reason, _ := args["reason"].(string)
-
-		switch sub {
-		case "list":
-			users, err := account.ListUsers()
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			var parts []string
-			for _, u := range users {
-				parts = append(parts, fmt.Sprintf("%s (%s)", u.Name, u.Role))
-			}
-			return cmdResult{Success: true, Data: strings.Join(parts, "\n")}
-		case "log":
-			if target == "" {
-				return cmdResult{Error: "请使用 --name 指定目标用户", ExitCode: 1}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("查看 %s 的操作记录（请在服务器端执行）", target)}
-		case "disable":
-			if target == "" {
-				return cmdResult{Error: "请使用 --name 指定要禁用的用户", ExitCode: 1}
-			}
-			err := account.DisableUser(target, reason, username)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("账号已禁用: %s", target)}
-		case "enable":
-			if target == "" {
-				return cmdResult{Error: "请使用 --name 指定要启用的用户", ExitCode: 1}
-			}
-			err := account.EnableUser(target, username)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("账号已启用: %s", target)}
-		case "delete":
-			if target == "" {
-				return cmdResult{Error: "请使用 --name 指定要删除的用户", ExitCode: 1}
-			}
-			err := account.DeleteUser(target, username)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("账号已删除: %s", target)}
-		default:
-			return cmdResult{Error: fmt.Sprintf("未知 user 子命令: %s", sub), ExitCode: 1}
-		}
-
-	case "watch":
-		sub, _ := args["sub"].(string)
-		watchName, _ := args["name"].(string)
-		dir, _ := args["dir"].(string)
-		pattern, _ := args["pattern"].(string)
-		creator, _ := args["user"].(string)
-
-		switch sub {
-		case "add":
-			if watchName == "" || dir == "" || pattern == "" {
-				return cmdResult{Error: "参数缺失: --name, --dir 和 --pattern 是必需的", ExitCode: 1}
-			}
-			item, err := watch.AddWatch(watchName, dir, pattern, creator)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("监听位已添加: %s", item.Name)}
-		case "list":
-			items, err := watch.ListWatches(watchName)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			if len(items) == 0 {
-				return cmdResult{Success: true, Data: "没有监听位"}
-			}
-			var parts []string
-			for _, item := range items {
-				parts = append(parts, fmt.Sprintf("%s | %s | %s", item.Name, item.Dir, item.Pattern))
-			}
-			return cmdResult{Success: true, Data: strings.Join(parts, "\n")}
-		case "check":
-			if watchName == "" {
-				return cmdResult{Error: "参数缺失: --name 是必需的", ExitCode: 1}
-			}
-			files, err := watch.CheckWatch(watchName)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			if len(files) == 0 {
-				return cmdResult{Success: true, Data: fmt.Sprintf("监听位 %s 无变更", watchName)}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("变更文件:\n%s", strings.Join(files, "\n"))}
-		case "remove":
-			if watchName == "" {
-				return cmdResult{Error: "参数缺失: --name 是必需的", ExitCode: 1}
-			}
-			err := watch.RemoveWatch(watchName, creator)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("监听位已移除: %s", watchName)}
-		case "clear":
-			err := watch.ClearWatches(creator)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 1}
-			}
-			return cmdResult{Success: true, Data: "所有监听位已清空"}
-		default:
-			return cmdResult{Error: fmt.Sprintf("未知 watch 子命令: %s", sub), ExitCode: 1}
-		}
-
-	case "wait":
-		mode, _ := args["mode"].(string)
-		switch mode {
-		case "message":
-			who, _ := args["from"].(string)
-			timeout := 60
-			if t, ok := args["timeout"].(float64); ok {
-				timeout = int(t)
-			}
-			content, elapsed, err := wait.WaitForMessage(who, timeout)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 2}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("收到消息: %s (等待%d秒)", content, elapsed)}
-		case "file":
-			dir, _ := args["dir"].(string)
-			pattern, _ := args["pattern"].(string)
-			timeout := 60
-			if t, ok := args["timeout"].(float64); ok {
-				timeout = int(t)
-			}
-			printContent, _ := args["printContent"].(bool)
-			watchMode, _ := args["watchMode"].(string)
-			matchedFile, elapsed, err := wait.WaitForFile(dir, pattern, timeout, printContent, watchMode)
-			if err != nil {
-				return cmdResult{Error: err.Error(), ExitCode: 2}
-			}
-			return cmdResult{Success: true, Data: fmt.Sprintf("发现文件: %s (等待%d秒)", matchedFile, elapsed)}
-		default:
-			return cmdResult{Error: fmt.Sprintf("未知 wait 模式: %s（可用: message, file）", mode), ExitCode: 1}
-		}
-
-	case "history":
-		withUser, _ := args["with"].(string)
-		limit := 20
-		if l, ok := args["limit"].(float64); ok {
-			limit = int(l)
-		}
-		messages, err := msgpkg.GetHistory(withUser, limit)
-		if err != nil {
-			return cmdResult{Error: err.Error(), ExitCode: 1}
-		}
-		if len(messages) == 0 {
-			return cmdResult{Success: true, Data: "没有历史消息"}
-		}
-		var parts []string
-		for _, msg := range messages {
-			parts = append(parts, fmt.Sprintf("[%s] %s → %s: %s", msg.Timestamp, msg.From, msg.To, msg.Content))
-		}
-		return cmdResult{Success: true, Data: strings.Join(parts, "\n")}
-
-	default:
-		return cmdResult{Error: fmt.Sprintf("未知命令: %s", cmd), ExitCode: 1}
-	}
 }
 
 // handleAPIHealth 处理 GET /api/v1/health 请求
@@ -513,25 +296,41 @@ func writeJSON(w http.ResponseWriter, statusCode int, data any) {
 // =============================================================================
 
 // runClientMode 以客户端模式运行命令（连接中心服务）
+// 三步走：[]string → ParseArgs → CommandArg → JSON → POST
 func runClientMode(protocol, address string, args []string) {
 	baseURL := address
 	if protocol == "http" {
 		baseURL = strings.TrimRight(address, "/")
 	}
 
-	// 构建请求
-	cmd := ""
-	if len(args) > 0 {
-		cmd = args[0]
+	// 使用 ParseArgs 统一解析参数（三步走的第一步）
+	cmd := ParseArgs(args, false)
+	cmd.HumanMode = false
+
+	// 直接序列化 CommandArg 发送到服务端
+	req := struct {
+		ID      string      `json:"id,omitempty"`
+		Command string      `json:"command"`
+		Args    *CommandArg `json:"args"`
+		Async   bool        `json:"async,omitempty"`
+	}{
+		Command: cmd.Command,
+		Args:    cmd,
 	}
 
-	reqBody := apiCommandRequest{
-		Command: cmd,
-		Args:    parseArgsToMap(args[1:]),
+	body, _ := json.Marshal(req)
+	httpReq, err := http.NewRequest("POST", baseURL+"/api/v1/command", strings.NewReader(string(body)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "创建请求失败: %v\n", err)
+		os.Exit(1)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	if token := os.Getenv("allinker_REMOTE_TOKEN"); token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	body, _ := json.Marshal(reqBody)
-	resp, err := http.Post(baseURL+"/api/v1/command", "application/json", strings.NewReader(string(body)))
+	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "连接服务失败: %v\n", err)
 		fmt.Fprintln(os.Stderr, "   请确认服务是否已启动 (allinker -server)")
@@ -553,35 +352,8 @@ func runClientMode(protocol, address string, args []string) {
 	}
 }
 
-// parseArgsToMap 将命令行参数解析为 map
-func parseArgsToMap(args []string) map[string]any {
-	m := make(map[string]any)
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "--") {
-			key := strings.TrimPrefix(arg, "--")
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
-				m[key] = args[i+1]
-				i++
-			} else {
-				m[key] = true
-			}
-		} else if strings.HasPrefix(arg, "-") {
-			key := strings.TrimPrefix(arg, "-")
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				m[key] = args[i+1]
-				i++
-			} else {
-				m[key] = true
-			}
-		}
-	}
-	return m
-}
-
 // tryConnectAndRun 尝试连接服务并执行命令，成功返回 true
 func tryConnectAndRun(args []string) bool {
-	// 尝试连接本地默认端口
 	baseURL := "http://127.0.0.1:8080"
 
 	resp, err := http.Get(baseURL + "/api/v1/health")
@@ -590,7 +362,88 @@ func tryConnectAndRun(args []string) bool {
 	}
 	defer resp.Body.Close()
 
-	// 服务可连接，使用客户端模式
 	runClientMode("http", baseURL, args)
 	return true
+}
+
+// tryAcquireServerLock 尝试获取服务 lock 文件。
+func tryAcquireServerLock(lockPath string) (*os.File, error) {
+	f, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
+	if err == nil {
+		return f, nil
+	}
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 lock 文件失败: %w", err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil || pid <= 0 {
+		os.Remove(lockPath)
+		return os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err == nil {
+		if err := proc.Signal(os.Signal(syscall.Signal(0))); err == nil {
+			return nil, fmt.Errorf("服务已在运行 (PID: %d, lock: %s)", pid, lockPath)
+		}
+	}
+
+	os.Remove(lockPath)
+	return os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
+}
+
+// =============================================================================
+// 中间件
+// =============================================================================
+
+// withAuth 鉴权中间件：从 config.json 读取 authToken 的 SHA-256 哈希并校验。
+func withAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg, err := config.GetConfig()
+		if err == nil && cfg.Server.AuthToken != "" {
+			token := r.Header.Get("Authorization")
+			if !strings.HasPrefix(token, "Bearer ") || len(token) <= 7 {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+			hashedToken := utils.HashTokenSHA256(token[7:])
+			if hashedToken != cfg.Server.AuthToken {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+// withLog 日志中间件
+func withLog(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next(w, r)
+		logutil.Info("%s %s (%s)", r.Method, r.URL.Path, time.Since(start))
+	}
+}
+
+// handleAPIReload 处理 POST /api/v1/reload
+func handleAPIReload(w http.ResponseWriter, r *http.Request) {
+	config.Reload()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "message": "配置已重新加载"})
+}
+
+// handleAPIInfo 处理 GET /api/v1/info
+func handleAPIInfo(w http.ResponseWriter, r *http.Request) {
+	cfg, _ := config.GetConfig()
+	info := map[string]any{
+		"service":   "allinker",
+		"version":   Version,
+		"status":    "running",
+		"dataDir":   core.Global.Root(),
+		"bind":      fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		"auth":      cfg.Server.AuthToken != "",
+		"auditSize": getAuditCount(),
+	}
+	writeJSON(w, http.StatusOK, info)
 }

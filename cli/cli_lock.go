@@ -4,7 +4,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"allinker/config"
@@ -14,33 +13,34 @@ import (
 
 // handleLock 处理 lock 命令（阻塞等待模式）
 // 用法: allinker lock -f <文件> -t <秒> --user <用户名>
-func handleLock(args []string, humanMode bool) {
-	filename, remaining := parseStringArg(args, "-f", "")
+func handleLock(cmd *CommandArg) error {
+	filename := cmd.File
 	if filename == "" {
-		filename, remaining = parseStringArg(remaining, "--file", "")
+		return &CLIError{Code: 1, Msg: "错误: 请使用 -f 或 --file 指定目标文件"}
 	}
-	if filename == "" {
-		fmt.Fprintln(os.Stderr, "错误: 请使用 -f 或 --file 指定目标文件")
-		os.Exit(1)
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
+	}
+	timeout := cmd.Timeout
+	if timeout == 0 {
+		timeout = 60
 	}
 
-	timeout, remaining := parseIntArg(remaining, "-t", 60)
-	username, _ := requireUser(remaining)
-
-	// 将超时秒数转换为截止时间
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Printf("正在获取锁: %s (操作者: %s)\n", filename, username)
 	}
 
-	err := lockpkg.AcquireLock(filename, username, deadline)
+	err := lockpkg.HandleLock(lockpkg.LockParams{
+		Filename: filename,
+		Username: username,
+		Timeout:  timeout,
+	})
 	if err != nil {
-		if humanMode {
-			fmt.Printf("错误: 锁获取失败: %v\n", err)
+		if cmd.HumanMode {
+			return &CLIError{Code: 3, Msg: fmt.Sprintf("错误: 锁获取失败: %v", err)}
 		}
-		ExitCode = 3
-		return
+		return &CLIError{Code: 3}
 	}
 
 	// 写入审计日志
@@ -54,7 +54,7 @@ func handleLock(args []string, humanMode bool) {
 	})
 
 	info := lockpkg.GetLockInfo(filename)
-	if humanMode {
+	if cmd.HumanMode {
 		if info != nil {
 			fmt.Printf("锁获取成功 (持有者: %s, 有效期至: %s)\n",
 				info.Holder, info.ExpiresAt.Format("15:04:05"))
@@ -64,32 +64,33 @@ func handleLock(args []string, humanMode bool) {
 	} else {
 		fmt.Println("锁获取成功")
 	}
+	return nil
 }
 
 // handleTryLock 处理 tryLock 命令（立即返回模式）
 // 用法: allinker tryLock -f <文件> --user <用户名>
-func handleTryLock(args []string, humanMode bool) {
-	filename, remaining := parseStringArg(args, "-f", "")
+func handleTryLock(cmd *CommandArg) error {
+	filename := cmd.File
 	if filename == "" {
-		filename, remaining = parseStringArg(remaining, "--file", "")
+		return &CLIError{Code: 1, Msg: "错误: 请使用 -f 或 --file 指定目标文件"}
 	}
-	if filename == "" {
-		fmt.Fprintln(os.Stderr, "错误: 请使用 -f 或 --file 指定目标文件")
-		os.Exit(1)
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
 	}
-	username, _ := requireUser(remaining)
 
-	err := lockpkg.TryAcquireLock(filename, username)
+	err := lockpkg.HandleLock(lockpkg.LockParams{
+		Filename: filename,
+		Username: username,
+		Timeout:  0, // tryLock 模式
+	})
 	if err != nil {
 		info := lockpkg.GetLockInfo(filename)
-		if humanMode && info != nil && !info.IsExpired() {
-			fmt.Printf("错误: 锁已被占用 (持有者: %s, 剩余时间: %d秒)\n",
-				info.Holder, info.RemainingSeconds())
-		} else {
-			fmt.Printf("错误: 锁获取失败: %v\n", err)
+		if cmd.HumanMode && info != nil && !info.IsExpired() {
+			return &CLIError{Code: 3, Msg: fmt.Sprintf("错误: 锁已被占用 (持有者: %s, 剩余时间: %d秒)",
+				info.Holder, info.RemainingSeconds())}
 		}
-		ExitCode = 3
-		return
+		return &CLIError{Code: 3, Msg: fmt.Sprintf("错误: 锁获取失败: %v", err)}
 	}
 
 	config.AppendAuditLog(model.AuditEntry{
@@ -102,26 +103,24 @@ func handleTryLock(args []string, humanMode bool) {
 	})
 
 	fmt.Println("锁获取成功")
+	return nil
 }
 
 // handleUnlock 处理 unlock 命令
 // 用法: allinker unlock -f <文件> --user <用户名>
-func handleUnlock(args []string, humanMode bool) {
-	filename, remaining := parseStringArg(args, "-f", "")
+func handleUnlock(cmd *CommandArg) error {
+	filename := cmd.File
 	if filename == "" {
-		filename, remaining = parseStringArg(remaining, "--file", "")
+		return &CLIError{Code: 1, Msg: "错误: 请使用 -f 或 --file 指定目标文件"}
 	}
-	if filename == "" {
-		fmt.Fprintln(os.Stderr, "错误: 请使用 -f 或 --file 指定目标文件")
-		os.Exit(1)
+	username := cmd.User
+	if username == "" {
+		return &CLIError{Code: 4, Msg: "错误: 请使用 --user 指定操作者"}
 	}
-	username, _ := requireUser(remaining)
 
 	err := lockpkg.ReleaseLock(filename, username)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "错误: 释放锁失败: %v\n", err)
-		ExitCode = 1
-		return
+		return &CLIError{Code: 1, Msg: fmt.Sprintf("错误: 释放锁失败: %v", err)}
 	}
 
 	config.AppendAuditLog(model.AuditEntry{
@@ -132,28 +131,24 @@ func handleUnlock(args []string, humanMode bool) {
 		Result: "success",
 	})
 
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Printf("已释放锁: %s (持有者: %s)\n", filename, username)
 	} else {
 		fmt.Println("已释放锁")
 	}
+	return nil
 }
 
 // handleLockStatus 处理 status 命令
 // 用法: allinker status [-f <文件> | --all]
-func handleLockStatus(args []string, humanMode bool) {
-	showAll, remaining := parseBoolArg(args, "--all")
-	filename, _ := parseStringArg(remaining, "-f", "")
-	if filename == "" {
-		filename, _ = parseStringArg(remaining, "--file", "")
-	}
+func handleLockStatus(cmd *CommandArg) error {
+	filename := cmd.File
 
-	if showAll {
-		// 查看所有锁
+	if cmd.All {
 		locks := lockpkg.ListLocks()
 		if len(locks) == 0 {
 			fmt.Println("当前没有活动的锁")
-			return
+			return nil
 		}
 		fmt.Printf("当前锁列表 (共计%d个):\n", len(locks))
 		for _, info := range locks {
@@ -163,18 +158,17 @@ func handleLockStatus(args []string, humanMode bool) {
 				fmt.Printf("   %s <- %s (剩余%d秒)\n", info.Filename, info.Holder, info.RemainingSeconds())
 			}
 		}
-		return
+		return nil
 	}
 
 	if filename == "" {
-		fmt.Fprintln(os.Stderr, "错误: 请使用 -f <文件> 指定文件，或使用 --all 查看所有锁")
-		os.Exit(1)
+		return &CLIError{Code: 1, Msg: "错误: 请使用 -f <文件> 指定文件，或使用 --all 查看所有锁"}
 	}
 
 	info := lockpkg.GetLockInfo(filename)
 	if info == nil || info.IsExpired() {
 		if info != nil {
-			if humanMode {
+			if cmd.HumanMode {
 				fmt.Printf("警告: 锁已过期 (过期时间: %s, 当前时间: %s)\n",
 					info.ExpiresAt.Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
 				fmt.Println("   建议: 使用 tryLock 重新获取")
@@ -184,10 +178,10 @@ func handleLockStatus(args []string, humanMode bool) {
 		} else {
 			fmt.Println("文件未被锁定")
 		}
-		return
+		return nil
 	}
 
-	if humanMode {
+	if cmd.HumanMode {
 		fmt.Printf("%s 已被锁定\n", filename)
 		fmt.Printf("   持有者: %s\n", info.Holder)
 		fmt.Printf("   锁定时间: %s\n", info.Timestamp.Format(time.RFC3339))
@@ -196,4 +190,5 @@ func handleLockStatus(args []string, humanMode bool) {
 	} else {
 		fmt.Printf("已被 %s 锁定 (剩余%d秒)\n", info.Holder, info.RemainingSeconds())
 	}
+	return nil
 }

@@ -1,4 +1,4 @@
-﻿// Package cli 解析命令行参数并将命令分发给对应的处理模块。
+// Package cli 解析命令行参数并将命令分发给对应的处理模块。
 //
 // allinker CLI 工具的命令格式：
 //
@@ -24,9 +24,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
-	"allinker/account"
+	"allinker/config"
 	initt "allinker/init"
 )
 
@@ -36,8 +35,19 @@ var Version = "1.0.0"
 // ExitCode 存储命令的退出码。
 var ExitCode = 0
 
+// CLIError 携带退出码的错误类型，供顶层统一处理。
+type CLIError struct {
+	Code int
+	Msg  string
+}
+
+func (e *CLIError) Error() string { return e.Msg }
+
+// runCLI 已内联到 Run() 的 switch 之后。
+
 // Run 是 CLI 的入口函数，解析参数并执行对应命令。
 func Run() {
+	//TODO:同样改造成三步走
 	// =========================================================================
 	// 定义全局标志
 	// =========================================================================
@@ -46,15 +56,16 @@ func Run() {
 	showVersion := flag.Bool("version", false, "显示版本信息")
 
 	// 服务模式标志
-	serverMode := flag.Bool("server", false, "启动中心服务模式（预备字段）")
-	serverPort := flag.Int("port", 8080, "服务端口（预备字段，仅服务模式有效）")
-	serverDaemon := flag.Bool("daemon", false, "后台运行（预备字段，仅服务模式有效）")
+	serverMode := flag.Bool("server", false, "启动中心服务模式")
+	serverPort := flag.Int("port", 8080, "服务端口（仅服务模式有效）")
 	serverStop := flag.Bool("stop", false, "停止服务")
 	serverStatus := flag.Bool("status", false, "查看服务状态")
 	serverRestart := flag.Bool("restart", false, "重启服务")
 
 	// 客户端模式标志
 	serverURL := flag.String("connect", "", "连接中心服务地址（如 http://127.0.0.1:8080）")
+	remoteName := flag.String("remote", "", "使用已保存的远程连接（如 -r 电脑1）")
+	remoteShort := flag.String("r", "", "使用已保存的远程连接（简写）")
 	socketPath := flag.String("socket", "", "通过 Unix Socket 连接服务")
 	autoMode := flag.Bool("auto", false, "自动检测服务，存在则连接，否则直接执行")
 
@@ -71,6 +82,10 @@ func Run() {
 
 全局选项:
   --data-dir <路径>   数据目录（默认 .alf）
+  --connect <地址>    连接远程服务（如 http://192.168.1.100:8080）
+  -r <名称>           使用已保存的远程连接（如 -r 电脑1）
+  --remote <名称>      同上
+  --auto              自动检测本地服务，存在则连接
   --ai                输出 AI 可解析的结构化内容
   --human             人类可读输出（带 emoji/表格）
   --help              显示此帮助
@@ -80,8 +95,8 @@ func Run() {
 命令:
 
   账号管理
-    register --name <用户名> [--role admin|agent|guest]
-                                      注册新账号
+    register --name <用户名> [--role admin|agent|guest] [--desc <岗位描述>]
+                                      注册新账号（--desc 可选的自定义描述）
 
   文件锁
     lock -f <文件> -t <秒> --user <用户名>
@@ -120,6 +135,15 @@ func Run() {
     user disable --name <用户名> --reason <原因> --user <管理员>
     user enable --name <用户名> --user <管理员>
     user delete --name <用户名> --user <管理员>
+
+  配置管理
+    set server [--host <地址>] [--port <端口>] [--token <令牌>]
+                                  配置本地服务
+    set remote --name <名称> --addr <地址> [--token <令牌>]
+                                  添加远程连接
+    set remote --list              列出远程连接
+    set remote --name <名称> --delete
+                                  删除远程连接
 
   数据维护
     fix [--check] [--dry-run]         检查并修复数据文件完整性
@@ -161,14 +185,17 @@ func Run() {
 	// 处理服务模式标志
 	// =========================================================================
 	if *serverMode {
-		runServerMode(*serverPort, *serverDaemon, *serverStop, *serverStatus, *serverRestart, isHuman)
+		runServerMode(*serverPort, *serverStop, *serverStatus, *serverRestart, isHuman)
 		return
 	}
 
 	// =========================================================================
 	// 初始化数据目录
 	// =========================================================================
-	initDataDir(*dataDir)
+	if err := initDataDir(*dataDir); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 
 	// =========================================================================
 	// 处理客户端模式
@@ -189,153 +216,55 @@ func Run() {
 		// 回退到 CLI 模式，继续执行
 	}
 
+	remote := *remoteName
+	if remote == "" {
+		remote = *remoteShort
+	}
+	if remote != "" {
+		cfg, err := config.GetConfig()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "错误: 读取配置失败: %v\n", err)
+			os.Exit(1)
+		}
+		rc, ok := cfg.Remotes[remote]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "错误: 远程连接 '%s' 未配置\n", remote)
+			fmt.Fprintf(os.Stderr, "   使用 allinker set remote --name %s --addr <地址> 添加\n", remote)
+			os.Exit(1)
+		}
+		url := fmt.Sprintf("http://%s", rc.Addr)
+		if rc.Token != "" {
+			os.Setenv("allinker_REMOTE_TOKEN", rc.Token)
+		}
+		os.Setenv("allinker_REMOTE_ACTIVE", "1")
+		runClientMode("http", url, flag.Args())
+		return
+	}
+
 	// =========================================================================
-	// CLI 模式 — 解析子命令
+	// CLI 模式 — 使用 ParseArgs + ExecuteParsed 统一解析和执行
+	// 三步走：[]string → ParseArgs → CommandArg → ExecuteParsed
 	// =========================================================================
 	args := flag.Args()
 	if len(args) == 0 {
 		flag.Usage()
-		os.Exit(1)
+		ExitCode = 1
+		return
 	}
 
-	cmd := args[0]
-	cmdArgs := args[1:]
-
-	switch cmd {
-	case "register":
-		handleRegister(cmdArgs, isHuman)
-	case "lock":
-		handleLock(cmdArgs, isHuman)
-	case "tryLock":
-		handleTryLock(cmdArgs, isHuman)
-	case "unlock":
-		handleUnlock(cmdArgs, isHuman)
-	case "status":
-		handleLockStatus(cmdArgs, isHuman)
-	case "watch":
-		handleWatch(cmdArgs, isHuman)
-	case "wait":
-		handleWait(cmdArgs, isHuman)
-	case "send":
-		handleSend(cmdArgs, isHuman)
-	case "recv":
-		handleRecv(cmdArgs, isHuman)
-	case "history":
-		handleHistory(cmdArgs, isHuman)
-	case "user":
-		handleUser(cmdArgs, isHuman)
-	case "fix":
-		handleFix(cmdArgs, isHuman)
-	default:
-		fmt.Fprintf(os.Stderr, " 未知命令: %s\n", cmd)
-		fmt.Fprintf(os.Stderr, "   使用 allinker --help 查看可用命令\n")
-		os.Exit(1)
-	}
-
-	os.Exit(ExitCode)
+	cmd := ParseArgs(args, isHuman)
+	ExecuteParsed(cmd)
 }
 
 // initDataDir 初始化数据目录。
-func initDataDir(dataDir string) {
+func initDataDir(dataDir string) error {
 	absDir, err := initt.InitDataDir(dataDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "错误: 初始化数据目录失败: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("错误: 初始化数据目录失败: %v", err)
 	}
 	// 设置数据目录环境变量，供子命令使用
 	os.Setenv("allinker_DATA_DIR", absDir)
-}
-
-// parseIntArg 从参数列表中解析一个 int 类型的命名参数。
-// 使用全新切片避免底层数组别名问题。
-func parseIntArg(args []string, name string, defaultVal int) (int, []string) {
-	for i, arg := range args {
-		if arg == name || arg == "-"+name {
-			if i+1 < len(args) {
-				val := 0
-				if _, err := fmt.Sscanf(args[i+1], "%d", &val); err == nil {
-					// 构建新切片，避免共享底层数组
-					remaining := make([]string, 0, len(args)-2)
-					remaining = append(remaining, args[:i]...)
-					remaining = append(remaining, args[i+2:]...)
-					return val, remaining
-				}
-			}
-		}
-		if strings.HasPrefix(arg, name+"=") || strings.HasPrefix(arg, "-"+name+"=") {
-			parts := strings.SplitN(arg, "=", 2)
-			if len(parts) == 2 {
-				val := 0
-				if _, err := fmt.Sscanf(parts[1], "%d", &val); err == nil {
-					remaining := make([]string, 0, len(args)-1)
-					remaining = append(remaining, args[:i]...)
-					remaining = append(remaining, args[i+1:]...)
-					return val, remaining
-				}
-			}
-		}
-	}
-	return defaultVal, args
-}
-
-// parseStringArg 从参数列表中解析一个 string 类型的命名参数。
-// 使用全新切片避免底层数组别名问题。
-func parseStringArg(args []string, name string, defaultVal string) (string, []string) {
-	for i, arg := range args {
-		if arg == name || arg == "-"+name {
-			if i+1 < len(args) {
-				val := args[i+1]
-				// 构建新切片，避免共享底层数组
-				remaining := make([]string, 0, len(args)-2)
-				remaining = append(remaining, args[:i]...)
-				remaining = append(remaining, args[i+2:]...)
-				return val, remaining
-			}
-		}
-		if strings.HasPrefix(arg, name+"=") || strings.HasPrefix(arg, "-"+name+"=") {
-			parts := strings.SplitN(arg, "=", 2)
-			if len(parts) == 2 {
-				remaining := make([]string, 0, len(args)-1)
-				remaining = append(remaining, args[:i]...)
-				remaining = append(remaining, args[i+1:]...)
-				return parts[1], remaining
-			}
-		}
-	}
-	return defaultVal, args
-}
-
-// parseBoolArg 从参数列表中解析一个 bool 类型的命名参数。
-func parseBoolArg(args []string, name string) (bool, []string) {
-	for i, arg := range args {
-		if arg == name || arg == "-"+name || arg == "--"+name {
-			remaining := make([]string, 0, len(args)-1)
-			remaining = append(remaining, args[:i]...)
-			remaining = append(remaining, args[i+1:]...)
-			return true, remaining
-		}
-	}
-	return false, args
-}
-
-// requireUser 验证 --user 参数，返回用户名和剩余参数。
-func requireUser(args []string) (string, []string) {
-	user, remaining := parseStringArg(args, "--user", "")
-	if user == "" {
-		user, remaining = parseStringArg(remaining, "-u", "")
-	}
-	if user == "" {
-		fmt.Fprintln(os.Stderr, "错误: 请使用 --user 指定操作者")
-		fmt.Fprintln(os.Stderr, "   示例: allinker <命令> --user TRAE")
-		os.Exit(4)
-	}
-	// 验证用户
-	_, err := account.VerifyUser(user)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
-		os.Exit(4)
-	}
-	return user, remaining
+	return nil
 }
 
 // printAIHelp 打印 AI 使用建议。
