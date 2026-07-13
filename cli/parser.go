@@ -85,6 +85,8 @@ func ExecuteParsed(cmd *CommandArg) {
 	switch cmd.Command {
 	case "register":
 		handleErr(handleRegister(cmd))
+	case "chat":
+		handleErr(handleChat(cmd))
 	case "lock":
 		handleErr(handleLock(cmd))
 	case "tryLock":
@@ -127,6 +129,8 @@ func ExecuteParsedResult(cmd *CommandArg) cmdResult {
 	switch cmd.Command {
 	case "register":
 		err = handleRegister(cmd)
+	case "chat":
+		return cmdResult{Error: "chat 命令不支持远程执行", ExitCode: 2}
 	case "lock":
 		err = handleLock(cmd)
 	case "tryLock":
@@ -251,6 +255,8 @@ func setField(cmd *CommandArg, name, value string) {
 		cmd.Delete = true
 	case "list":
 		cmd.List = true
+	case "new-only", "newOnly":
+		cmd.NewOnly = true
 	}
 }
 

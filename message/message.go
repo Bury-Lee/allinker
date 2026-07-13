@@ -87,11 +87,6 @@ type HistoryParams struct {
 	Limit    int
 }
 
-// HandleSend 是 send 命令的共享处理函数。
-func HandleSend(p SendParams) (*model.Message, error) {
-	return AppMessage.SendMessage(p.From, p.To, p.Content)
-}
-
 // HandleRecv 是 recv 命令的共享处理函数。
 func HandleRecv(p RecvParams) ([]*model.Message, error) {
 	if p.All || p.ID > 0 {
@@ -100,9 +95,20 @@ func HandleRecv(p RecvParams) ([]*model.Message, error) {
 	return AppMessage.ReceiveMessages(p.From, p.User, false, 0)
 }
 
+// HandleSend 是 send 命令的共享处理函数。
+func HandleSend(p SendParams) (*model.Message, error) {
+	return AppMessage.SendMessage(p.From, p.To, p.Content)
+}
+
 // HandleHistory 是 history 命令的共享处理函数。
 func HandleHistory(p HistoryParams) ([]*model.Message, error) {
 	return AppMessage.GetHistory(p.WithUser, p.Limit)
+}
+
+// GetMessagesSince 获取 ID 大于 sinceID 的消息（全局视图，不限用户）。
+// 用于 chat 实时轮询。limit<=0 时不限制。
+func GetMessagesSince(sinceID int64, limit int) ([]*model.Message, error) {
+	return AppMessage.GetMessagesSince(sinceID, limit)
 }
 
 // MessageORM 是 GORM 对应的消息表结构。
@@ -324,6 +330,57 @@ func (s *MessageService) GetHistory(withUser string, limit int) ([]*model.Messag
 		})
 	}
 
+	return result, nil
+}
+
+// GetMessagesSince 获取 ID 大于 sinceID 的所有消息（全局视图，不限用户）。
+func (s *MessageService) GetMessagesSince(sinceID int64, limit int) ([]*model.Message, error) {
+	var messages []MessageORM
+	query := s.db.Model(&MessageORM{}).Where("id > ?", sinceID).Order("id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	query.Find(&messages)
+
+	result := make([]*model.Message, len(messages))
+	for i, m := range messages {
+		toName := "All"
+		if m.To != nil {
+			toName = *m.To
+		}
+		result[i] = &model.Message{
+			ID:        m.ID,
+			From:      m.SenderName,
+			To:        toName,
+			Content:   m.Content,
+			Timestamp: m.CreatedAt.Format(time.RFC3339),
+		}
+	}
+	return result, nil
+}
+
+// GetBroadcastsSince 获取 ID 大于 sinceID 的广播消息（To IS NULL，即群发 All 的消息）。
+// 不包含私发给特定用户的消息，用于 chat 聊天室展示。
+func (s *MessageService) GetBroadcastsSince(sinceID int64, limit int) ([]*model.Message, error) {
+	var messages []MessageORM
+	query := s.db.Model(&MessageORM{}).
+		Where("id > ? AND `to` IS NULL", sinceID).
+		Order("id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	query.Find(&messages)
+
+	result := make([]*model.Message, len(messages))
+	for i, m := range messages {
+		result[i] = &model.Message{
+			ID:        m.ID,
+			From:      m.SenderName,
+			To:        "All",
+			Content:   m.Content,
+			Timestamp: m.CreatedAt.Format(time.RFC3339),
+		}
+	}
 	return result, nil
 }
 

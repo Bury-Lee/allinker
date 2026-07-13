@@ -27,7 +27,7 @@ allinker 通过**四个协作原语**解决这些问题：
 | 原语 | 解决的问题 |
 |------|-----------|
 | **文件锁定** | Agent 编辑文件前先加锁，防止冲突 |
-| **消息通信** | Agent 之间互相发送消息，支持 `@` 提醒 |
+| **消息通信** | Agent 之间互相发送消息 |
 | **文件监听** | Agent 注册监听位，感知同事的进展 |
 | **账号管理** | 身份签名 + 三级权限 + 完整审计追踪 |
 
@@ -49,6 +49,7 @@ go build -o allinker.exe .
 ./allinker register --name TRAE --role agent
 ./allinker register --name CodeX --role agent
 ./allinker register --name 管理员 --role admin
+./allinker register --name 新同事 --role agent --desc "后端开发"   # 可选岗位描述
 ```
 
 ### 文件锁定
@@ -66,9 +67,39 @@ go build -o allinker.exe .
 ```bash
 ./allinker send --to CodeX --msg "请实现用户认证模块" --user TRAE
 ./allinker send --to All --msg "群发通知" --user TRAE
-./allinker recv                                                   # 接收消息
+./allinker recv                                                   # 接收未读消息
+./allinker recv --all                                             # 查看全部消息
 ./allinker history --with CodeX --limit 10                        # 查看历史记录
 ```
+
+### 等待消息（基于位图未读）
+
+默认模式：需要 `--user` 指明等待者，通过位图判断未读消息。有未读则立即返回，无未读则轮询等待。
+
+```bash
+# TRAE 等待来自 CodeX 的消息（有未读立即返回）
+./allinker wait -m message --from CodeX --user TRAE
+
+# 跳过已有未读，只看等待期间到达的新消息（不推荐）
+./allinker wait -m message --from CodeX -t 60 --newOnly
+```
+
+### 人类聊天室
+
+实时查看所有 AI 对话，可选参与发言：
+
+```bash
+# 只读模式
+./allinker chat
+
+# 参与模式（需先注册）
+./allinker chat --user TRAE
+
+# 指定轮询间隔
+./allinker chat --user TRAE --interval 3
+```
+
+聊天室中每个发言者自动分配不同颜色，支持 `/quit` 或 `/exit` 退出。
 
 ### 文件监听 — 等待同伴响应
 
@@ -101,8 +132,11 @@ allinker 可以以 HTTP 服务的形式长期驻留运行，**同一局域网内
 # 启动服务
 ./allinker -server --port 8080
 
-# 客户端模式（连接远程服务）
-./allinker --connect http://127.0.0.1:8080 lock -f PLAN_001.md --user TRAE
+# 保存远程连接配置
+./allinker set remote --name 电脑1 --addr 192.168.1.100:8080 --token 密码
+
+# 通过命名远程连接执行命令
+./allinker -r 电脑1 lock -f PLAN_001.md --user TRAE
 
 # 自动模式：检测到服务则走网络，否则本地执行
 ./allinker --auto send --to CodeX --msg "你好" --user TRAE
@@ -163,12 +197,11 @@ build.bat
 
 ```
 .alf/
-├── users.json        # 用户账号
-├── config.json       # 工具配置
+├── users.json        # 用户账号（含岗位描述）
+├── config.json       # 工具配置（Token 以 SHA-256 哈希存储）
 ├── counter.json      # ID 计数器
-├── watchlist.json    # 监听位注册表
 ├── allinker.db       # SQLite 数据库（消息 + 锁 + 监听位）
-└── Logs/             # 日志文件（每日轮转 YYYY-MM-DD.log）
+└── Logs/             # 日志文件（每日轮转）
 ```
 
 写操作采用**原子写入**（临时文件 → 重命名），防止数据损坏。
@@ -183,7 +216,7 @@ build.bat
 ├── go.mod
 ├── build.bat      # 跨平台编译脚本
 ├── account/       # 账号管理
-├── cli/           # CLI 命令路由
+├── cli/           # CLI 命令路由（三步走：ParseArgs → CommandArg → ExecuteParsed）
 ├── config/        # 配置管理
 ├── core/          # 全局单例
 ├── init/          # 数据目录与数据库初始化
@@ -192,7 +225,8 @@ build.bat
 ├── message/       # 消息通信
 ├── model/         # 数据模型
 ├── storage/       # JSON 持久化
-├── wait/          # 阻塞式文件等待
+├── utils/         # 参数解析工具函数
+├── wait/          # 阻塞式文件/消息等待
 └── watch/         # 文件监听
 ```
 

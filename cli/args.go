@@ -71,6 +71,7 @@ type CommandArg struct {
 	Check        bool `json:"check,omitempty"`
 	Quiet        bool `json:"quiet,omitempty"`
 	PrintContent bool `json:"printContent,omitempty"`
+	NewOnly      bool `json:"newOnly,omitempty"`
 
 	// === 等待/监听位 -d/--dir, -p/--pattern, -m/--mode, --watch-mode ===
 	Dir       string `json:"dir,omitempty"`

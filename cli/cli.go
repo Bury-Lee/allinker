@@ -112,12 +112,16 @@ func Run() {
                                       接收消息（默认仅未读）
     history [--with <用户>] [--limit <条数>]
                                       查看通信记录
+    chat [--user <用户名>] [--interval <秒>]
+                                      人类聊天室：实时查看 AI 对话（--user 可选，可参与发言）
 
   等待
     wait -m file -d <目录> -f <模式> [-t <秒>] [--quiet] [--print-content]
                                       等待文件出现（默认模式）
-    wait -m message [--from <发送者>] [-t <秒>]
-                                      等待其他用户发来的消息
+    wait -m message [--from <发送者>] --user <接收者> [-t <秒>]
+                                      等待消息：查位图未读，有则立即返回（默认模式）
+    wait -m message [--from <发送者>] [-t <秒>] [--newOnly]
+                                      等待消息：只看等待期间到达的新消息（不查位图）
 
   文件监听
     watch add --name <名称> -d <目录> -p <模式> --user <用户名>
@@ -277,10 +281,10 @@ func printAIHelp() {
 【第一次使用】
 
    1. 先注册自己
-      ./allinker register --name <你的名字> --role agent
+      ./allinker register --name <你的名字> --role agent [--desc <岗位描述>]
 
    2. 查看所有已注册的队友
-      ./allinker list
+      ./allinker user list --user <你的名字>
 
 【消息通信】
 
@@ -305,17 +309,40 @@ func printAIHelp() {
 
 【消息等待】
 
-   11. 需要队友响应时用 wait -m message 阻塞等待，
-       避免空轮询浪费资源。
+   11. 需要队友响应时用 wait -m message --from <发送者> --user <接收者>
+       阻塞等待，避免空轮询浪费资源。有未读消息会立即返回。
 
 【账号管理】
 
    12. 所有操作必须带 --user（或 -u）签名。
    13. 管理员使用 user disable 禁用异常账号。
 
+【空闲等待 — 核心行为规范】
+
+   14. 没有任务时，使用长等待：
+      ./allinker wait -m message -t 300
+      ./allinker wait -d <目录> -f "RESP_*.md" -t 300
+      超时后继续重新等待，直到收到明确指令。
+
+   15. 非必要时**不要打扰用户**。任务认领、进度同步、问题讨论
+       等能通过 wait 等待消息解决的，优先在 Agent 内部完成。
+
+   16. 只有用户明确表示"你可以直接和组长沟通"时，才能主动联系组长。
+       除此之外，所有内部协商都通过消息通信完成，不经过用户。
+
+   17. 跟进任务时首选 wait -m message 等待别人的消息，
+       也可以 watch wait 等待关键文件的修改。
+       尽量不要主动 pull/recv 打扰别人。
+
+【人类聊天室】
+
+   18. 人类可通过 chat 命令实时旁观 Agent 对话：
+      ./allinker chat                        # 只读
+      ./allinker chat --user <用户名>        # 可参与发言
+
 【最佳实践】
 
-   14. 先锁后改，改完即放，消息群发，监听等待。
+   19. 先锁后改，改完即放，消息群发，监听等待。
 
 更多帮助: allinker --help
 `)
